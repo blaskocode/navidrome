@@ -13,6 +13,7 @@ import (
 	"github.com/navidrome/navidrome/core/agents"
 	"github.com/navidrome/navidrome/core/agents/lastfm"
 	"github.com/navidrome/navidrome/core/agents/listenbrainz"
+	aidj2 "github.com/navidrome/navidrome/core/aidj"
 	"github.com/navidrome/navidrome/core/artwork"
 	"github.com/navidrome/navidrome/core/external"
 	"github.com/navidrome/navidrome/core/ffmpeg"
@@ -25,6 +26,7 @@ import (
 	"github.com/navidrome/navidrome/plugins"
 	"github.com/navidrome/navidrome/scanner"
 	"github.com/navidrome/navidrome/server"
+	"github.com/navidrome/navidrome/server/aidj"
 	"github.com/navidrome/navidrome/server/events"
 	"github.com/navidrome/navidrome/server/nativeapi"
 	"github.com/navidrome/navidrome/server/public"
@@ -134,6 +136,14 @@ func CreateListenBrainzRouter() *listenbrainz.Router {
 	return router
 }
 
+func CreateAIDJRouter(ctx context.Context) *aidj.Router {
+	sqlDB := db.Db()
+	dataStore := persistence.New(sqlDB)
+	sessionManager := aidj2.NewSessionManager(dataStore)
+	router := aidj.New(dataStore, sessionManager)
+	return router
+}
+
 func CreateInsights() metrics.Insights {
 	sqlDB := db.Db()
 	dataStore := persistence.New(sqlDB)
@@ -202,7 +212,7 @@ func getPluginManager() plugins.Manager {
 
 // wire_injectors.go:
 
-var allProviders = wire.NewSet(core.Set, artwork.Set, server.New, subsonic.New, nativeapi.New, public.New, persistence.New, lastfm.NewRouter, listenbrainz.NewRouter, events.GetBroker, scanner.New, scanner.GetWatcher, plugins.GetManager, metrics.GetPrometheusInstance, db.Db, wire.Bind(new(agents.PluginLoader), new(plugins.Manager)), wire.Bind(new(scrobbler.PluginLoader), new(plugins.Manager)), wire.Bind(new(metrics.PluginLoader), new(plugins.Manager)), wire.Bind(new(core.Watcher), new(scanner.Watcher)))
+var allProviders = wire.NewSet(core.Set, artwork.Set, server.New, subsonic.New, nativeapi.New, public.New, aidj.New, persistence.New, lastfm.NewRouter, listenbrainz.NewRouter, events.GetBroker, scanner.New, scanner.GetWatcher, plugins.GetManager, metrics.GetPrometheusInstance, db.Db, wire.Bind(new(agents.PluginLoader), new(plugins.Manager)), wire.Bind(new(scrobbler.PluginLoader), new(plugins.Manager)), wire.Bind(new(metrics.PluginLoader), new(plugins.Manager)), wire.Bind(new(core.Watcher), new(scanner.Watcher)))
 
 func GetPluginManager(ctx context.Context) plugins.Manager {
 	manager := getPluginManager()

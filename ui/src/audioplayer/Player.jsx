@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { useMediaQuery } from '@material-ui/core'
 import { ThemeProvider } from '@material-ui/core/styles'
@@ -30,6 +30,7 @@ import locale from './locale'
 import { keyMap } from '../hotkeys'
 import keyHandlers from './keyHandlers'
 import { calculateGain } from '../utils/calculateReplayGain'
+import { useAiDj } from '../aiDj/useAiDj'
 
 const Player = () => {
   const theme = useCurrentTheme()
@@ -62,6 +63,14 @@ const Player = () => {
   const gainInfo = useSelector((state) => state.replayGain)
   const [context, setContext] = useState(null)
   const [gainNode, setGainNode] = useState(null)
+
+  // AI DJ integration
+  const {
+    active: aiDjActive,
+    nextTrack: reportAiDjPlayed,
+    skipTrack: reportAiDjSkipped,
+  } = useAiDj()
+  const lastTrackRef = useRef(null)
 
   useEffect(() => {
     if (
@@ -238,14 +247,26 @@ const Player = () => {
     [context, dispatch, showNotifications, startTime],
   )
 
-  const onAudioPlayTrackChange = useCallback(() => {
-    if (scrobbled) {
-      setScrobbled(false)
-    }
-    if (startTime !== null) {
-      setStartTime(null)
-    }
-  }, [scrobbled, startTime])
+  const onAudioPlayTrackChange = useCallback(
+    (currentPlayId, audioLists, audioInfo) => {
+      // Detect skip: track changed before it ended and before scrobble threshold
+      // If we haven't scrobbled yet, it likely means the user skipped
+      if (aiDjActive && lastTrackRef.current && !scrobbled) {
+        reportAiDjSkipped(lastTrackRef.current)
+      }
+
+      // Update last track reference
+      lastTrackRef.current = audioInfo?.trackId || null
+
+      if (scrobbled) {
+        setScrobbled(false)
+      }
+      if (startTime !== null) {
+        setStartTime(null)
+      }
+    },
+    [scrobbled, startTime, aiDjActive, reportAiDjSkipped],
+  )
 
   const onAudioPause = useCallback(
     (info) => dispatch(currentPlaying(info)),
@@ -257,12 +278,18 @@ const Player = () => {
       setScrobbled(false)
       setStartTime(null)
       dispatch(currentPlaying(info))
+
+      // Report to AI DJ if active
+      if (aiDjActive && info.trackId) {
+        reportAiDjPlayed(info.trackId)
+      }
+
       dataProvider
         .getOne('keepalive', { id: info.trackId })
         // eslint-disable-next-line no-console
         .catch((e) => console.log('Keepalive error:', e))
     },
-    [dispatch, dataProvider],
+    [dispatch, dataProvider, aiDjActive, reportAiDjPlayed],
   )
 
   const onCoverClick = useCallback((mode, audioLists, audioInfo) => {

@@ -274,6 +274,24 @@
         "removed": "Missing file(s) removed"
       }
     },
+    "aiDj": {
+      "title": "AI DJ",
+      "description": "AI DJ will create a personalized radio from your library based on your listening history.",
+      "mode": "Mode",
+      "modes": {
+        "default": "Default - Mix of favorites and discoveries",
+        "defaultShort": "Default",
+        "nostalgia": "Nostalgia - Older favorites and forgotten gems",
+        "nostalgiaShort": "Nostalgia",
+        "discovery": "Discovery - Rarely played tracks",
+        "discoveryShort": "Discovery"
+      },
+      "seedInfo": "Using current selection as seed",
+      "start": "Start",
+      "end": "End DJ",
+      "upNext": "Up Next",
+      "moreTracks": "more tracks"
+    },
     "library": {
       "name": "Library |||| Libraries",
       "fields": {

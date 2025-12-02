@@ -7,9 +7,17 @@ import {
   getResources,
 } from 'react-admin'
 import { MdInfo, MdPerson, MdSupervisorAccount } from 'react-icons/md'
-import { useSelector } from 'react-redux'
-import { makeStyles, MenuItem, ListItemIcon, Divider } from '@material-ui/core'
+import { useSelector, useDispatch } from 'react-redux'
+import {
+  makeStyles,
+  MenuItem,
+  ListItemIcon,
+  Divider,
+  IconButton,
+  Tooltip,
+} from '@material-ui/core'
 import ViewListIcon from '@material-ui/icons/ViewList'
+import RadioIcon from '@material-ui/icons/Radio'
 import { Dialogs } from '../dialogs/Dialogs'
 import { AboutDialog } from '../dialogs'
 import PersonalMenu from './PersonalMenu'
@@ -17,6 +25,8 @@ import ActivityPanel from './ActivityPanel'
 import NowPlayingPanel from './NowPlayingPanel'
 import UserMenu from './UserMenu'
 import config from '../config'
+import { AiDjPanel } from '../aiDj'
+import { openAiDjDialog } from '../actions'
 
 const useStyles = makeStyles(
   (theme) => ({
@@ -66,6 +76,27 @@ const settingsResources = (resource) =>
   resource.hasList &&
   resource.options &&
   resource.options.subMenu === 'settings'
+
+const AiDjButton = () => {
+  const dispatch = useDispatch()
+  const translate = useTranslate()
+  const aiDjActive = useSelector((state) => state.aiDj?.active)
+
+  const handleClick = () => {
+    dispatch(openAiDjDialog())
+  }
+
+  return (
+    <Tooltip title={translate('resources.aiDj.title', { _: 'AI DJ' })}>
+      <IconButton
+        color={aiDjActive ? 'primary' : 'inherit'}
+        onClick={handleClick}
+      >
+        <RadioIcon />
+      </IconButton>
+    </Tooltip>
+  )
+}
 
 const CustomUserMenu = ({ onClick, ...rest }) => {
   const translate = useTranslate()
@@ -120,6 +151,7 @@ const CustomUserMenu = ({ onClick, ...rest }) => {
 
   return (
     <>
+      <AiDjButton />
       {config.devActivityPanel &&
         permissions === 'admin' &&
         config.enableNowPlaying && <NowPlayingPanel />}
@@ -135,6 +167,7 @@ const CustomUserMenu = ({ onClick, ...rest }) => {
         <AboutMenuItem />
       </UserMenu>
       <Dialogs />
+      <AiDjPanel />
     </>
   )
 }
