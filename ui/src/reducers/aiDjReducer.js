@@ -16,6 +16,7 @@ import {
   AIDJ_UPDATE_STATE,
   AIDJ_CLEAR_ERROR,
   AIDJ_SAVE_PLAY_MODE,
+  AIDJ_SET_PREFERENCES,
 } from '../actions'
 
 const initialState = {
@@ -30,6 +31,11 @@ const initialState = {
   chapterText: '',
   error: null,
   previousPlayMode: null,
+  preferences: {
+    energy: null,     // null = any mood
+    decade: null,     // null = any decade
+    contexts: [],     // empty = no context filters
+  },
 }
 
 export const aiDjReducer = (state = initialState, action) => {
@@ -136,6 +142,12 @@ export const aiDjReducer = (state = initialState, action) => {
       return {
         ...state,
         previousPlayMode: action.payload,
+      }
+
+    case AIDJ_SET_PREFERENCES:
+      return {
+        ...state,
+        preferences: action.preferences,
       }
 
     default:

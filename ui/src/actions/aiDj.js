@@ -21,6 +21,7 @@ export const AIDJ_SKIP_TRACK_FAILURE = 'AIDJ_SKIP_TRACK_FAILURE'
 export const AIDJ_UPDATE_STATE = 'AIDJ_UPDATE_STATE'
 export const AIDJ_CLEAR_ERROR = 'AIDJ_CLEAR_ERROR'
 export const AIDJ_SAVE_PLAY_MODE = 'AIDJ_SAVE_PLAY_MODE'
+export const AIDJ_SET_PREFERENCES = 'AIDJ_SET_PREFERENCES'
 
 // Dialog Actions
 export const openAiDjDialog = (seedTrackId = null, seedArtistId = null) => ({
@@ -110,4 +111,9 @@ export const clearAiDjError = () => ({
 export const aiDjSavePlayMode = (mode) => ({
   type: AIDJ_SAVE_PLAY_MODE,
   payload: mode,
+})
+
+export const setAiDjPreferences = (preferences) => ({
+  type: AIDJ_SET_PREFERENCES,
+  preferences,
 })

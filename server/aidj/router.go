@@ -38,15 +38,23 @@ func (api *Router) routes() http.Handler {
 	r.Post("/next", api.next)
 	r.Post("/skip", api.skip)
 	r.Post("/end", api.endSession)
+	r.Get("/enrichment/status", api.getEnrichmentStatus)
+
+	// Theme endpoints
+	r.Get("/themes", api.listThemes)
+	r.Post("/start-themed", api.startThemedSession)
 
 	return r
 }
 
 type startRequest struct {
-	Mode           string  `json:"mode"`
-	SeedTrackID    *string `json:"seedTrackId"`
-	SeedArtistID   *string `json:"seedArtistId"`
-	SeedPlaylistID *string `json:"seedPlaylistId"`
+	Mode           string                 `json:"mode,omitempty"`
+	SeedTrackID    *string                `json:"seedTrackId,omitempty"`
+	SeedArtistID   *string                `json:"seedArtistId,omitempty"`
+	SeedPlaylistID *string                `json:"seedPlaylistId,omitempty"`
+	ThemeID        *string                `json:"themeId,omitempty"`
+	Autonomous     bool                   `json:"autonomous,omitempty"`  // explicit autonomous flag
+	Preferences    *model.UserPreferences `json:"preferences,omitempty"` // user preference filters
 }
 
 func (api *Router) startSession(w http.ResponseWriter, r *http.Request) {
@@ -59,29 +67,53 @@ func (api *Router) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mode := model.DJMode(req.Mode)
-	if mode == "" {
-		mode = model.DJModeDefault
-	}
-	if !mode.IsValid() {
-		http.Error(w, "invalid mode", http.StatusBadRequest)
-		return
+	var session *model.DJSession
+	var err error
+
+	// Use autonomous mode if explicitly requested OR if no mode/seeds specified
+	isAutonomous := req.Autonomous || (req.Mode == "" && req.SeedTrackID == nil && req.SeedArtistID == nil && req.SeedPlaylistID == nil && req.ThemeID == nil)
+
+	if isAutonomous && req.Preferences != nil {
+		// Autonomous mode with user preferences
+		session, err = api.manager.CreatePreferencedSession(ctx, user.ID, req.Preferences)
+	} else if isAutonomous {
+		session, err = api.manager.CreateAutonomousSession(ctx, user.ID)
+	} else if req.ThemeID != nil {
+		// Theme-based session
+		session, err = api.manager.CreateThemedSession(ctx, user.ID, *req.ThemeID)
+	} else {
+		// Legacy mode-based session
+		mode := model.DJMode(req.Mode)
+		if mode == "" {
+			mode = model.DJModeDefault
+		}
+		if !mode.IsValid() {
+			http.Error(w, "invalid mode", http.StatusBadRequest)
+			return
+		}
+
+		var seedTrackIDs, seedArtistIDs []string
+		if req.SeedTrackID != nil {
+			seedTrackIDs = []string{*req.SeedTrackID}
+		}
+		if req.SeedArtistID != nil {
+			seedArtistIDs = []string{*req.SeedArtistID}
+		}
+
+		session, err = api.manager.CreateSession(ctx, user.ID, mode, seedTrackIDs, seedArtistIDs, req.SeedPlaylistID)
 	}
 
-	var seedTrackIDs, seedArtistIDs []string
-	if req.SeedTrackID != nil {
-		seedTrackIDs = []string{*req.SeedTrackID}
-	}
-	if req.SeedArtistID != nil {
-		seedArtistIDs = []string{*req.SeedArtistID}
-	}
-
-	session, err := api.manager.CreateSession(ctx, user.ID, mode, seedTrackIDs, seedArtistIDs, req.SeedPlaylistID)
 	if err != nil {
 		log.Error(ctx, "Error creating DJ session", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	log.Debug(ctx, "Session created successfully",
+		"sessionID", session.ID,
+		"queueLen", len(session.Queue),
+		"hasPreferences", req.Preferences != nil,
+	)
 
 	state, err := api.buildState(ctx, session)
 	if err != nil {
@@ -89,6 +121,11 @@ func (api *Router) startSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	log.Debug(ctx, "Responding with state",
+		"sessionID", state.SessionID,
+		"upNextLen", len(state.UpNext),
+	)
 
 	respondJSON(w, http.StatusOK, state)
 }
@@ -233,24 +270,126 @@ func (api *Router) endSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (api *Router) getEnrichmentStatus(w http.ResponseWriter, r *http.Request) {
+	es := aidj.GetEnrichmentService(api.ds)
+	if es == nil {
+		// Service not initialized yet
+		respondJSON(w, http.StatusOK, aidj.EnrichmentStatus{
+			Total:      0,
+			Enriched:   0,
+			Percentage: 0,
+			InProgress: false,
+		})
+		return
+	}
+	status := es.Status()
+	respondJSON(w, http.StatusOK, status)
+}
+
 func (api *Router) buildState(ctx context.Context, session *model.DJSession) (*model.DJState, error) {
+	log.Debug(ctx, "buildState called", "sessionID", session.ID, "queueLen", len(session.Queue), "queue", session.Queue)
+
 	state := &model.DJState{
-		SessionID:   session.ID,
-		Mode:        session.Mode,
-		ChapterText: session.ChapterText,
-		UpNext:      make([]model.MediaFile, 0, len(session.Queue)),
+		SessionID:    session.ID,
+		Mode:         session.Mode,
+		ChapterText:  session.ChapterText,
+		UpNext:       make([]model.MediaFile, 0, len(session.Queue)),
+		IsAutonomous: session.AutonomousMode,
+	}
+
+	// Add theme info if present
+	if session.CurrentThemeID != "" {
+		state.ThemeID = session.CurrentThemeID
+		registry := aidj.GetThemeRegistry()
+		if theme := registry.GetTheme(session.CurrentThemeID); theme != nil {
+			state.ThemeName = theme.Name
+		}
+		state.SetProgress = session.CurrentSetPlayed
+		state.SetSize = session.CurrentSetSize
+	}
+
+	// Check for exhaustion
+	if len(session.Queue) == 0 {
+		state.IsExhausted = true
+		if session.ChapterText == "" {
+			session.ChapterText = "That's all the music I have for now. Thanks for listening!"
+			state.ChapterText = session.ChapterText
+		}
 	}
 
 	// Load full track data for queue
 	for _, trackID := range session.Queue {
 		track, err := api.ds.MediaFile(ctx).Get(trackID)
 		if err != nil {
+			log.Warn(ctx, "Could not load track", "trackID", trackID, err)
 			continue // Skip tracks that no longer exist
 		}
 		state.UpNext = append(state.UpNext, *track)
 	}
 
+	log.Debug(ctx, "buildState complete", "upNextLen", len(state.UpNext))
 	return state, nil
+}
+
+// listThemes returns all available themes
+func (api *Router) listThemes(w http.ResponseWriter, r *http.Request) {
+	registry := aidj.GetThemeRegistry()
+	themes := registry.AllThemes()
+
+	// Build response
+	type themeResponse struct {
+		ID          string `json:"id"`
+		Category    string `json:"category"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+
+	response := make([]themeResponse, len(themes))
+	for i, t := range themes {
+		response[i] = themeResponse{
+			ID:          t.ID,
+			Category:    string(t.Category),
+			Name:        t.Name,
+			Description: t.Description,
+		}
+	}
+
+	respondJSON(w, http.StatusOK, response)
+}
+
+// startThemedSession starts a new DJ session with a specific theme
+func (api *Router) startThemedSession(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user, _ := request.UserFrom(ctx)
+
+	var req struct {
+		ThemeID string `json:"themeId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.ThemeID == "" {
+		http.Error(w, "themeId is required", http.StatusBadRequest)
+		return
+	}
+
+	session, err := api.manager.CreateThemedSession(ctx, user.ID, req.ThemeID)
+	if err != nil {
+		log.Error(ctx, "Error creating themed DJ session", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	state, err := api.buildState(ctx, session)
+	if err != nil {
+		log.Error(ctx, "Error building DJ state", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, state)
 }
 
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {

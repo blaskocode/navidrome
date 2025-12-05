@@ -364,6 +364,10 @@ type MediaFileRepository interface {
 	DeleteAllMissing() (int64, error)
 	FindByPaths(paths []string) (MediaFiles, error)
 
+	// The following methods are used by AI DJ enrichment:
+	CountUnenriched(tagKey string) (int64, error)
+	GetUnenriched(tagKey string, limit int) (MediaFiles, error)
+
 	// The following methods are used exclusively by the scanner:
 	MarkMissing(bool, ...*MediaFile) error
 	MarkMissingByFolder(missing bool, folderIDs ...string) error

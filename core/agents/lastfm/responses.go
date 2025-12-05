@@ -4,6 +4,7 @@ type Response struct {
 	Artist         Artist         `json:"artist"`
 	SimilarArtists SimilarArtists `json:"similarartists"`
 	TopTracks      TopTracks      `json:"toptracks"`
+	TrackTopTags   TrackTopTags   `json:"toptags"`
 	Album          Album          `json:"album"`
 	Error          int            `json:"error"`
 	Message        string         `json:"message"`
@@ -57,6 +58,19 @@ type Track struct {
 type TopTracks struct {
 	Track []Track `json:"track"`
 	Attr  Attr    `json:"@attr"`
+}
+
+// TrackTag represents a single tag for a track from track.getTopTags
+type TrackTag struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+	URL   string `json:"url"`
+}
+
+// TrackTopTags represents the toptags response wrapper
+type TrackTopTags struct {
+	Tag  []TrackTag `json:"tag"`
+	Attr Attr       `json:"@attr"`
 }
 
 type Session struct {

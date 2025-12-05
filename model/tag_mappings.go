@@ -242,5 +242,8 @@ func init() {
 		criteria.AddRoles(slices.Collect(maps.Keys(AllRoles)))
 		criteria.AddTagNames(tagNames())
 		criteria.AddNumericTags(numericTagNames())
+
+		// Register AI enrichment tags for criteria queries (used by AI DJ themes)
+		criteria.AddTagNames([]string{"ai_mood", "ai_vibe", "ai_energy"})
 	})
 }

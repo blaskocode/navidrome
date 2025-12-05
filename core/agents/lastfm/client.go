@@ -38,6 +38,11 @@ func newClient(apiKey string, secret string, lang string, hc httpDoer) *client {
 	return &client{apiKey, secret, lang, hc}
 }
 
+// NewClient creates a new Last.fm client for external use (e.g., enrichment)
+func NewClient(apiKey, secret, lang string, hc httpDoer) *client {
+	return newClient(apiKey, secret, lang, hc)
+}
+
 type client struct {
 	apiKey string
 	secret string
@@ -93,6 +98,27 @@ func (c *client) artistGetTopTracks(ctx context.Context, name string, limit int)
 		return nil, err
 	}
 	return &response.TopTracks, nil
+}
+
+func (c *client) trackGetTopTags(ctx context.Context, artist, track string, mbid string) ([]TrackTag, error) {
+	params := url.Values{}
+	params.Add("method", "track.getTopTags")
+	if mbid != "" {
+		params.Add("mbid", mbid)
+	} else {
+		params.Add("artist", artist)
+		params.Add("track", track)
+	}
+	response, err := c.makeRequest(ctx, http.MethodGet, params, false)
+	if err != nil {
+		return nil, err
+	}
+	return response.TrackTopTags.Tag, nil
+}
+
+// GetTrackTags fetches top tags for a track from Last.fm
+func (c *client) GetTrackTags(ctx context.Context, artist, track string, mbid string) ([]TrackTag, error) {
+	return c.trackGetTopTags(ctx, artist, track, mbid)
 }
 
 func (c *client) GetToken(ctx context.Context) (string, error) {

@@ -340,6 +340,34 @@ func (r *mediaFileRepository) FindRecentFilesByProperties(missing model.MediaFil
 	return res.toModels(), nil
 }
 
+// CountUnenriched counts tracks that don't have the specified tag key in their tags JSONB
+func (r *mediaFileRepository) CountUnenriched(tagKey string) (int64, error) {
+	// Query for tracks where the tag key doesn't exist in the JSONB tags column
+	// The tags column stores JSON like: {"tag_name": [{"id": "xxx", "value": "yyy"}, ...]}
+	// We check if the key is missing or null
+	sel := r.newSelect().Columns("count(*) as count").Where(
+		Expr(fmt.Sprintf(`(tags IS NULL OR tags = '' OR json_extract(tags, '$.%s') IS NULL)`, tagKey)),
+	)
+	sel = r.applyLibraryFilter(sel)
+	var res struct{ Count int64 }
+	err := r.queryOne(sel, &res)
+	return res.Count, err
+}
+
+// GetUnenriched returns tracks that don't have the specified tag key in their tags JSONB
+func (r *mediaFileRepository) GetUnenriched(tagKey string, limit int) (model.MediaFiles, error) {
+	sel := r.selectMediaFile().Where(
+		Expr(fmt.Sprintf(`(media_file.tags IS NULL OR media_file.tags = '' OR json_extract(media_file.tags, '$.%s') IS NULL)`, tagKey)),
+	).Limit(uint64(limit))
+
+	var res dbMediaFiles
+	err := r.queryAll(sel, &res)
+	if err != nil {
+		return nil, err
+	}
+	return res.toModels(), nil
+}
+
 func (r *mediaFileRepository) Search(q string, offset int, size int, options ...model.QueryOptions) (model.MediaFiles, error) {
 	var res dbMediaFiles
 	if uuid.Validate(q) == nil {

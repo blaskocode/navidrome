@@ -25,7 +25,7 @@ export const useAiDj = () => {
   const playerMode = useSelector((state) => state.player?.mode || 'order')
 
   const startSession = useCallback(
-    async (mode = 'default', seedTrackId, seedArtistId, seedPlaylistId) => {
+    async (mode = null, seedTrackId, seedArtistId, seedPlaylistId, preferences) => {
       dispatch(
         startSessionAction(mode, seedTrackId, seedArtistId, seedPlaylistId),
       )
@@ -35,6 +35,7 @@ export const useAiDj = () => {
           seedTrackId,
           seedArtistId,
           seedPlaylistId,
+          preferences,
         )
         dispatch(startSessionSuccess(state))
 

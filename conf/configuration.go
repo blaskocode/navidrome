@@ -103,6 +103,7 @@ type configOptions struct {
 	Spotify                         spotifyOptions      `json:",omitzero"`
 	Deezer                          deezerOptions       `json:",omitzero"`
 	ListenBrainz                    listenBrainzOptions `json:",omitzero"`
+	AIDj                            aidjOptions         `json:",omitzero"`
 	Tags                            map[string]TagConf  `json:",omitempty"`
 	Agents                          string
 
@@ -185,6 +186,13 @@ type deezerOptions struct {
 type listenBrainzOptions struct {
 	Enabled bool
 	BaseURL string
+}
+
+type aidjOptions struct {
+	EnrichmentEnabled        bool
+	MinimumEnrichmentPercent int
+	SetSizeMin               int
+	SetSizeMax               int
 }
 
 type secureOptions struct {
@@ -573,6 +581,10 @@ func setViperDefaults() {
 	viper.SetDefault("deezer.language", "en")
 	viper.SetDefault("listenbrainz.enabled", true)
 	viper.SetDefault("listenbrainz.baseurl", "https://api.listenbrainz.org/1/")
+	viper.SetDefault("aidj.enrichmentenabled", true)
+	viper.SetDefault("aidj.minimumenrichmentpercent", 25)
+	viper.SetDefault("aidj.setsizemin", 3)
+	viper.SetDefault("aidj.setsizemax", 5)
 	viper.SetDefault("httpsecurityheaders.customframeoptionsvalue", "DENY")
 	viper.SetDefault("backup.path", "")
 	viper.SetDefault("backup.schedule", "")

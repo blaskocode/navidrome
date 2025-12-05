@@ -277,6 +277,7 @@
     "aiDj": {
       "title": "AI DJ",
       "description": "AI DJ will create a personalized radio from your library based on your listening history.",
+      "prompt": "I want to hear...",
       "mode": "Mode",
       "modes": {
         "default": "Default - Mix of favorites and discoveries",
@@ -286,8 +287,22 @@
         "discovery": "Discovery - Rarely played tracks",
         "discoveryShort": "Discovery"
       },
+      "energy": {
+        "label": "Energy",
+        "upbeat": "upbeat",
+        "soft": "soft",
+        "intense": "intense",
+        "any": "any mood"
+      },
+      "context": {
+        "label": "Context",
+        "fromThe": "from the",
+        "forgotten": "haven't heard in a while",
+        "favorites": "my favorites",
+        "new": "something new to me"
+      },
       "seedInfo": "Using current selection as seed",
-      "start": "Start",
+      "start": "Start DJ",
       "end": "End DJ",
       "upNext": "Up Next",
       "moreTracks": "more tracks"

@@ -12,6 +12,7 @@ import (
 	_ "github.com/navidrome/navidrome/adapters/taglib"
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
+	"github.com/navidrome/navidrome/core/aidj"
 	"github.com/navidrome/navidrome/db"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
@@ -84,6 +85,7 @@ func runNavidrome(ctx context.Context) {
 	g.Go(scheduleDBOptimizer(ctx))
 	g.Go(startPluginManager(ctx))
 	g.Go(runInitialScan(ctx))
+	g.Go(startEnrichmentService(ctx))
 	if conf.Server.Scanner.Enabled {
 		g.Go(startScanWatcher(ctx))
 		g.Go(schedulePeriodicScan(ctx))
@@ -341,6 +343,19 @@ func startPluginManager(ctx context.Context) func() error {
 		manager.ScanPlugins()
 
 		return nil
+	}
+}
+
+// startEnrichmentService starts the AI DJ metadata enrichment service, if enabled.
+func startEnrichmentService(ctx context.Context) func() error {
+	return func() error {
+		if !conf.Server.AIDj.EnrichmentEnabled {
+			log.Info(ctx, "AI DJ enrichment is DISABLED")
+			return nil
+		}
+		ds := CreateDataStore()
+		es := aidj.GetEnrichmentService(ds)
+		return es.Run(ctx)
 	}
 }
 

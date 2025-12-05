@@ -120,7 +120,7 @@ const NowPlayingItem = React.memo(
     const translate = useTranslate()
 
     return (
-      <ListItem key={nowPlayingEntry.playerId} className={classes.listItem}>
+      <ListItem className={classes.listItem}>
         <ListItemAvatar>
           <Link
             to={`/album/${nowPlayingEntry.albumId}/show`}
@@ -213,9 +213,9 @@ const NowPlayingList = React.memo(
                 dense
                 aria-label={translate('nowPlaying.title')}
               >
-                {entries.map((nowPlayingEntry) => (
+                {entries.map((nowPlayingEntry, index) => (
                   <NowPlayingItem
-                    key={nowPlayingEntry.playerId}
+                    key={`${nowPlayingEntry.playerId}-${nowPlayingEntry.id || index}`}
                     nowPlayingEntry={nowPlayingEntry}
                     onLinkClick={onLinkClick}
                     getArtistLink={getArtistLink}

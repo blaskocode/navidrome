@@ -4,11 +4,13 @@ import { baseUrl } from '../utils'
 const API_BASE = '/api/ai-dj'
 
 const aiDjApi = {
-  startSession: async (mode, seedTrackId, seedArtistId, seedPlaylistId) => {
-    const body = { mode }
+  startSession: async (mode, seedTrackId, seedArtistId, seedPlaylistId, preferences) => {
+    const body = {}
+    if (mode) body.mode = mode
     if (seedTrackId) body.seedTrackId = seedTrackId
     if (seedArtistId) body.seedArtistId = seedArtistId
     if (seedPlaylistId) body.seedPlaylistId = seedPlaylistId
+    if (preferences) body.preferences = preferences
 
     const response = await httpClient(baseUrl(`${API_BASE}/start`), {
       method: 'POST',

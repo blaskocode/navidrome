@@ -93,27 +93,38 @@ func mapExpr(expr squirrel.Sqlizer, negate bool, exprFunc func(string, squirrel.
 		log.Fatal(fmt.Sprintf("expr is not a map-based operator: %T", expr))
 	}
 
-	// Extract into a generic map
-	var k string
-	m := make(map[string]any, rv.Len())
+	// Extract the key and value from the original expression
+	var tagName string
+	var tagValue any
 	for _, key := range rv.MapKeys() {
-		// Save the key to build the expression, and use the provided keyName as the key
-		k = key.String()
-		m["value"] = rv.MapIndex(key).Interface()
+		tagName = key.String()
+		tagValue = rv.MapIndex(key).Interface()
 		break // only one key is expected (and supported)
 	}
 
-	// Clear the original map
-	for _, key := range rv.MapKeys() {
-		rv.SetMapIndex(key, reflect.Value{})
+	// Create a new expression with "value" as the key, preserving the original operator type.
+	// This is used inside the json_tree subquery where the column is named "value".
+	// We need to match the original expression type (Eq, Gt, Lt, Like, etc.)
+	var newExpr squirrel.Sqlizer
+	switch expr.(type) {
+	case squirrel.Eq, Is:
+		newExpr = squirrel.Eq{"value": tagValue}
+	case squirrel.NotEq, IsNot:
+		newExpr = squirrel.NotEq{"value": tagValue}
+	case squirrel.Gt, Gt:
+		newExpr = squirrel.Gt{"value": tagValue}
+	case squirrel.Lt, Lt:
+		newExpr = squirrel.Lt{"value": tagValue}
+	case squirrel.Like, Contains, StartsWith, EndsWith:
+		newExpr = squirrel.Like{"value": tagValue}
+	case squirrel.NotLike, NotContains:
+		newExpr = squirrel.NotLike{"value": tagValue}
+	default:
+		// Fallback to Eq for unknown types
+		newExpr = squirrel.Eq{"value": tagValue}
 	}
 
-	// Write the updated map back into the original variable
-	for key, val := range m {
-		rv.SetMapIndex(reflect.ValueOf(key), reflect.ValueOf(val))
-	}
-
-	return exprFunc(k, expr, negate)
+	return exprFunc(tagName, newExpr, negate)
 }
 
 // mapTagExpr maps a normal field expression to a tag expression.
