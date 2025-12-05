@@ -168,7 +168,7 @@ func (s *ThemeSelector) determineSetSize(poolSize int) int {
 
 	// Random size between min and max
 	if maxSize > minSize {
-		return minSize + rand.Intn(maxSize-minSize+1)
+		return minSize + rand.Intn(maxSize-minSize+1) //nolint:gosec // Non-cryptographic use: pool size selection
 	}
 	return minSize
 }

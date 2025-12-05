@@ -32,9 +32,9 @@ const initialState = {
   error: null,
   previousPlayMode: null,
   preferences: {
-    energy: null,     // null = any mood
-    decade: null,     // null = any decade
-    contexts: [],     // empty = no context filters
+    energy: null, // null = any mood
+    decade: null, // null = any decade
+    contexts: [], // empty = no context filters
   },
 }
 

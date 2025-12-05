@@ -361,7 +361,7 @@ func selectTemplate(templates []string, category string) string {
 	// Find a template not recently used
 	var selectedIdx int
 	for attempts := 0; attempts < len(templates); attempts++ {
-		selectedIdx = rand.Intn(len(templates))
+		selectedIdx = rand.Intn(len(templates)) //nolint:gosec // Non-cryptographic use: template selection
 
 		// Check if recently used
 		isRecent := false
@@ -544,15 +544,4 @@ func GeneratePivotCommentary(theme *Theme, ctx *CommentaryContext) string {
 
 	template := selectTemplate(pivotTemplates, "pivot")
 	return substituteVariables(template, ctx)
-}
-
-// generateThemeCommentarySimple is a backwards-compatible wrapper
-// that generates commentary without track context
-func generateThemeCommentarySimple(theme *Theme) string {
-	return GenerateThemeCommentary(theme, nil)
-}
-
-// generatePivotCommentarySimple is a backwards-compatible wrapper
-func generatePivotCommentarySimple(theme *Theme) string {
-	return GeneratePivotCommentary(theme, nil)
 }

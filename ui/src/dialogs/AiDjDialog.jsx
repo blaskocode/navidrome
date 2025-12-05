@@ -47,9 +47,17 @@ const useStyles = makeStyles((theme) => ({
 }))
 
 const ENERGY_OPTIONS = [
-  { value: 'upbeat', labelKey: 'resources.aiDj.energy.upbeat', fallback: 'upbeat' },
+  {
+    value: 'upbeat',
+    labelKey: 'resources.aiDj.energy.upbeat',
+    fallback: 'upbeat',
+  },
   { value: 'soft', labelKey: 'resources.aiDj.energy.soft', fallback: 'soft' },
-  { value: 'intense', labelKey: 'resources.aiDj.energy.intense', fallback: 'intense' },
+  {
+    value: 'intense',
+    labelKey: 'resources.aiDj.energy.intense',
+    fallback: 'intense',
+  },
   { value: '', labelKey: 'resources.aiDj.energy.any', fallback: 'any mood' },
 ]
 
@@ -103,8 +111,15 @@ export const AiDjDialog = () => {
     }
 
     // Only pass preferences if any are set
-    const hasPreferences = energy || decadeEnabled || selectedContexts.length > 0
-    startSession(null, seedTrackId, seedArtistId, null, hasPreferences ? preferences : null)
+    const hasPreferences =
+      energy || decadeEnabled || selectedContexts.length > 0
+    startSession(
+      null,
+      seedTrackId,
+      seedArtistId,
+      null,
+      hasPreferences ? preferences : null,
+    )
   }
 
   const toggleContext = (key) => {
@@ -134,7 +149,7 @@ export const AiDjDialog = () => {
       <DialogContent>
         <Typography variant="body1" className={classes.prompt}>
           {translate('resources.aiDj.prompt', {
-            _: 'I want to hear...'
+            _: 'I want to hear...',
           })}
         </Typography>
 
@@ -175,7 +190,7 @@ export const AiDjDialog = () => {
                   />
                 }
                 label={translate('resources.aiDj.context.fromThe', {
-                  _: 'from the'
+                  _: 'from the',
                 })}
               />
               <Select
@@ -202,7 +217,7 @@ export const AiDjDialog = () => {
                 />
               }
               label={translate('resources.aiDj.context.forgotten', {
-                _: "haven't heard in a while"
+                _: "haven't heard in a while",
               })}
             />
             <FormControlLabel
@@ -213,7 +228,7 @@ export const AiDjDialog = () => {
                 />
               }
               label={translate('resources.aiDj.context.favorites', {
-                _: 'my favorites'
+                _: 'my favorites',
               })}
             />
             <FormControlLabel
@@ -224,7 +239,7 @@ export const AiDjDialog = () => {
                 />
               }
               label={translate('resources.aiDj.context.new', {
-                _: 'something new to me'
+                _: 'something new to me',
               })}
             />
           </FormGroup>

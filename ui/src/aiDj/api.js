@@ -4,7 +4,13 @@ import { baseUrl } from '../utils'
 const API_BASE = '/api/ai-dj'
 
 const aiDjApi = {
-  startSession: async (mode, seedTrackId, seedArtistId, seedPlaylistId, preferences) => {
+  startSession: async (
+    mode,
+    seedTrackId,
+    seedArtistId,
+    seedPlaylistId,
+    preferences,
+  ) => {
     const body = {}
     if (mode) body.mode = mode
     if (seedTrackId) body.seedTrackId = seedTrackId
