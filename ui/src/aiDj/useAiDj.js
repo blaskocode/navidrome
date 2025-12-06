@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import {
   startSession as startSessionAction,
@@ -18,12 +18,17 @@ import {
 } from '../actions'
 import { playTracks, setPlayMode, addTracks } from '../actions/player'
 import aiDjApi from './api'
+import { useDjSpeech } from './useDjSpeech'
 
 export const useAiDj = () => {
   const dispatch = useDispatch()
   const aiDj = useSelector((state) => state.aiDj || {})
   const playerMode = useSelector((state) => state.player?.mode || 'order')
   const playerQueue = useSelector((state) => state.player?.queue || [])
+  const { isSpeaking, playCommentary } = useDjSpeech()
+
+  // Track the last known chapterText to detect set transitions
+  const lastChapterTextRef = useRef(null)
 
   const startSession = useCallback(
     async (
@@ -46,18 +51,31 @@ export const useAiDj = () => {
         )
         dispatch(startSessionSuccess(state))
 
+        // Store initial chapter text
+        lastChapterTextRef.current = state.chapterText
+
         // Auto-play first track if available
-        if (state.upNext && state.upNext.length > 0) {
+        // Only add tracks from the CURRENT set, not future sets
+        // This prevents auto-advance into the next set before DJ speaks
+        const currentSetTracks = state.sets
+          ? state.sets.find((s) => s.isCurrent)?.tracks || []
+          : state.upNext || []
+
+        if (currentSetTracks.length > 0) {
           const tracksById = {}
-          state.upNext.forEach((track) => {
+          currentSetTracks.forEach((track) => {
             tracksById[track.id] = track
           })
 
-          // Save current play mode and set to orderLoop for continuous playback
+          // Save current play mode and set to 'order' so player stops at end of set
+          // (not 'orderLoop' which would loop back before DJ can speak)
           dispatch(aiDjSavePlayMode(playerMode))
-          dispatch(setPlayMode('orderLoop'))
+          dispatch(setPlayMode('order'))
 
-          dispatch(playTracks(tracksById, Object.keys(tracksById)))
+          // Play commentary first, then start music
+          playCommentary(state.chapterText, () => {
+            dispatch(playTracks(tracksById, Object.keys(tracksById)))
+          })
         }
 
         return state
@@ -68,7 +86,7 @@ export const useAiDj = () => {
         throw error
       }
     },
-    [dispatch, playerMode],
+    [dispatch, playerMode, playCommentary],
   )
 
   const endSession = useCallback(async () => {
@@ -104,29 +122,42 @@ export const useAiDj = () => {
         const state = await aiDjApi.next(aiDj.sessionId, playedTrackId)
         dispatch(nextTrackSuccess(state))
 
-        // Sync player queue with backend state
-        // The backend returns the full queue of remaining tracks across all sets
-        if (state.upNext && state.upNext.length > 0) {
+        // Check if we transitioned to a new set (chapterText changed)
+        const isNewSet =
+          state.chapterText && state.chapterText !== lastChapterTextRef.current
+        lastChapterTextRef.current = state.chapterText
+
+        // Only add tracks from the CURRENT set to prevent auto-advance
+        const currentSetTracks = state.sets
+          ? state.sets.find((s) => s.isCurrent)?.tracks || []
+          : state.upNext || []
+
+        if (currentSetTracks.length > 0) {
           // Get current player track IDs
           const currentTrackIds = new Set(
             playerQueue.map((item) => item.trackId),
           )
 
-          // Check if there are any new tracks we don't have
-          const hasNewTracks = state.upNext.some(
+          // Find tracks from current set that aren't in the player queue
+          const newTracks = currentSetTracks.filter(
             (track) => !currentTrackIds.has(track.id),
           )
 
-          // If there are new tracks, add them to keep the queue growing
-          if (hasNewTracks) {
-            const newTracks = state.upNext.filter(
-              (track) => !currentTrackIds.has(track.id),
-            )
+          if (newTracks.length > 0) {
             const newTracksById = {}
             newTracks.forEach((track) => {
               newTracksById[track.id] = track
             })
-            dispatch(addTracks(newTracksById, Object.keys(newTracksById)))
+
+            // If new set, play commentary then START playing new tracks (replace queue)
+            // If same set, just add tracks to existing queue
+            if (isNewSet) {
+              playCommentary(state.chapterText, () => {
+                dispatch(playTracks(newTracksById, Object.keys(newTracksById)))
+              })
+            } else {
+              dispatch(addTracks(newTracksById, Object.keys(newTracksById)))
+            }
           }
         }
 
@@ -136,7 +167,7 @@ export const useAiDj = () => {
         throw error
       }
     },
-    [dispatch, aiDj.sessionId, playerQueue],
+    [dispatch, aiDj.sessionId, playerQueue, playCommentary],
   )
 
   const skipTrack = useCallback(
@@ -148,15 +179,24 @@ export const useAiDj = () => {
         const state = await aiDjApi.skip(aiDj.sessionId, skippedTrackId)
         dispatch(skipTrackSuccess(state))
 
-        // Add any new tracks to the player queue that aren't already there
-        if (state.upNext && state.upNext.length > 0) {
+        // Check if we pivoted to a new theme (chapterText changed)
+        const isPivot =
+          state.chapterText && state.chapterText !== lastChapterTextRef.current
+        lastChapterTextRef.current = state.chapterText
+
+        // Only add tracks from the CURRENT set to prevent auto-advance
+        const currentSetTracks = state.sets
+          ? state.sets.find((s) => s.isCurrent)?.tracks || []
+          : state.upNext || []
+
+        if (currentSetTracks.length > 0) {
           // Get current player track IDs
           const currentTrackIds = new Set(
             playerQueue.map((item) => item.trackId),
           )
 
-          // Find tracks that are new (not in current player queue)
-          const newTracks = state.upNext.filter(
+          // Find tracks from current set that aren't in the player queue
+          const newTracks = currentSetTracks.filter(
             (track) => !currentTrackIds.has(track.id),
           )
 
@@ -165,7 +205,16 @@ export const useAiDj = () => {
             newTracks.forEach((track) => {
               newTracksById[track.id] = track
             })
-            dispatch(addTracks(newTracksById, Object.keys(newTracksById)))
+
+            // If pivot, play commentary then START playing new tracks (replace queue)
+            // If same set, just add tracks to existing queue
+            if (isPivot) {
+              playCommentary(state.chapterText, () => {
+                dispatch(playTracks(newTracksById, Object.keys(newTracksById)))
+              })
+            } else {
+              dispatch(addTracks(newTracksById, Object.keys(newTracksById)))
+            }
           }
         }
 
@@ -175,7 +224,7 @@ export const useAiDj = () => {
         throw error
       }
     },
-    [dispatch, aiDj.sessionId, playerQueue],
+    [dispatch, aiDj.sessionId, playerQueue, playCommentary],
   )
 
   const clearError = useCallback(() => {
@@ -184,6 +233,7 @@ export const useAiDj = () => {
 
   return {
     ...aiDj,
+    isSpeaking,
     startSession,
     endSession,
     nextTrack,

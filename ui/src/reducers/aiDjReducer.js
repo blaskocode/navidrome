@@ -17,6 +17,9 @@ import {
   AIDJ_CLEAR_ERROR,
   AIDJ_SAVE_PLAY_MODE,
   AIDJ_SET_PREFERENCES,
+  AIDJ_SPEECH_START,
+  AIDJ_SPEECH_END,
+  AIDJ_SPEECH_ERROR,
 } from '../actions'
 
 const initialState = {
@@ -37,6 +40,7 @@ const initialState = {
     decade: null, // null = any decade
     contexts: [], // empty = no context filters
   },
+  isSpeaking: false, // true while DJ commentary audio is playing
 }
 
 export const aiDjReducer = (state = initialState, action) => {
@@ -94,6 +98,7 @@ export const aiDjReducer = (state = initialState, action) => {
     case AIDJ_END_SESSION_SUCCESS:
       return {
         ...initialState,
+        isSpeaking: false,
       }
 
     case AIDJ_END_SESSION_FAILURE:
@@ -151,6 +156,19 @@ export const aiDjReducer = (state = initialState, action) => {
       return {
         ...state,
         preferences: action.preferences,
+      }
+
+    case AIDJ_SPEECH_START:
+      return {
+        ...state,
+        isSpeaking: true,
+      }
+
+    case AIDJ_SPEECH_END:
+    case AIDJ_SPEECH_ERROR:
+      return {
+        ...state,
+        isSpeaking: false,
       }
 
     default:

@@ -3,6 +3,21 @@ import { baseUrl } from '../utils'
 
 const API_BASE = '/api/ai-dj'
 
+// Helper function for fetching audio (bypasses JSON parsing)
+const fetchAudio = async (url) => {
+  const token = localStorage.getItem('token')
+  const headers = {}
+  if (token) {
+    headers['X-ND-Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(baseUrl(url), { headers })
+  if (!response.ok) {
+    throw new Error(`TTS request failed: ${response.status}`)
+  }
+  return response.blob()
+}
+
 const aiDjApi = {
   startSession: async (
     mode,
@@ -53,6 +68,13 @@ const aiDjApi = {
       method: 'POST',
       body: JSON.stringify({ sessionId }),
     })
+  },
+
+  // Fetch TTS audio for the provided commentary text
+  getCommentaryAudio: async (text) => {
+    return fetchAudio(
+      `${API_BASE}/commentary-audio?text=${encodeURIComponent(text)}`,
+    )
   },
 }
 

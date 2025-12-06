@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/core/aidj"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
@@ -44,6 +46,9 @@ func (api *Router) routes() http.Handler {
 	// Theme endpoints
 	r.Get("/themes", api.listThemes)
 	r.Post("/start-themed", api.startThemedSession)
+
+	// TTS endpoint
+	r.Get("/commentary-audio", api.getCommentaryAudio)
 
 	return r
 }
@@ -444,6 +449,40 @@ func (api *Router) startThemedSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, state)
+}
+
+// getCommentaryAudio generates TTS audio for the provided commentary text
+func (api *Router) getCommentaryAudio(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Check if OpenAI is enabled
+	if !conf.Server.AIDj.OpenAIEnabled || conf.Server.AIDj.OpenAIAPIKey == "" {
+		http.Error(w, "TTS not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get the commentary text from query parameter
+	commentary := r.URL.Query().Get("text")
+	if commentary == "" {
+		http.Error(w, "text parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate TTS audio
+	ttsClient := aidj.NewTTSClient(conf.Server.AIDj.OpenAIAPIKey, http.DefaultClient)
+	audio, err := ttsClient.GenerateSpeech(ctx, commentary)
+	if err != nil {
+		log.Error(ctx, "Failed to generate TTS audio", "error", err)
+		http.Error(w, "TTS generation failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Return MP3 audio
+	w.Header().Set("Content-Type", "audio/mpeg")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(audio)))
+	if _, err := w.Write(audio); err != nil {
+		log.Error(ctx, "Failed to write TTS audio response", "error", err)
+	}
 }
 
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {

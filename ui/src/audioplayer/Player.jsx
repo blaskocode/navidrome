@@ -31,6 +31,7 @@ import { keyMap } from '../hotkeys'
 import keyHandlers from './keyHandlers'
 import { calculateGain } from '../utils/calculateReplayGain'
 import { useAiDj } from '../aiDj/useAiDj'
+import { setMusicPlayerAudioInstance } from '../aiDj/useDjSpeech'
 
 const Player = () => {
   const theme = useCurrentTheme()
@@ -67,6 +68,7 @@ const Player = () => {
   // AI DJ integration
   const {
     active: aiDjActive,
+    isSpeaking,
     nextTrack: reportAiDjPlayed,
     skipTrack: reportAiDjSkipped,
   } = useAiDj()
@@ -103,6 +105,19 @@ const Player = () => {
       gainNode.gain.setValueAtTime(numericGain, context.currentTime)
     }
   }, [audioInstance, context, gainNode, playerState, gainInfo])
+
+  // Keep the shared audio instance reference updated for DJ speech
+  useEffect(() => {
+    setMusicPlayerAudioInstance(audioInstance)
+    return () => setMusicPlayerAudioInstance(null)
+  }, [audioInstance])
+
+  // Pause music playback while DJ is speaking
+  useEffect(() => {
+    if (audioInstance && isSpeaking) {
+      audioInstance.pause()
+    }
+  }, [audioInstance, isSpeaking])
 
   const defaultOptions = useMemo(
     () => ({
@@ -147,15 +162,22 @@ const Player = () => {
       ...defaultOptions,
       audioLists: playerState.queue.map((item) => item),
       playIndex: playerState.playIndex,
-      autoPlay: playerState.clear || playerState.playIndex === 0,
+      autoPlay:
+        !isSpeaking && (playerState.clear || playerState.playIndex === 0),
       clearPriorAudioLists: playerState.clear,
       extendsContent: (
         <PlayerToolbar id={current.trackId} isRadio={current.isRadio} />
       ),
       defaultVolume: isMobilePlayer ? 1 : playerState.volume,
       showMediaSession: !current.isRadio,
+      // Disable controls while DJ is speaking
+      showPlayMode: !isSpeaking,
+      showPrev: !isSpeaking,
+      showPlay: !isSpeaking,
+      showNext: !isSpeaking,
+      showDestroy: !isSpeaking,
     }
-  }, [playerState, defaultOptions, isMobilePlayer])
+  }, [playerState, defaultOptions, isMobilePlayer, isSpeaking])
 
   const onAudioListsChange = useCallback(
     (_, audioLists, audioInfo) => dispatch(syncQueue(audioInfo, audioLists)),
@@ -249,9 +271,16 @@ const Player = () => {
 
   const onAudioPlayTrackChange = useCallback(
     (currentPlayId, audioLists, audioInfo) => {
-      // Detect skip: track changed before it ended and before scrobble threshold
-      // If we haven't scrobbled yet, it likely means the user skipped
-      if (aiDjActive && lastTrackRef.current && !scrobbled) {
+      // Detect skip: track changed before scrobble threshold AND not near the end
+      // If we haven't scrobbled and the track wasn't near completion, it's a skip
+      // Check audioInstance to see if track was near the end (within 5 seconds or 95%)
+      const isNearEnd =
+        audioInstance &&
+        audioInstance.duration &&
+        (audioInstance.currentTime >= audioInstance.duration - 5 ||
+          audioInstance.currentTime / audioInstance.duration >= 0.95)
+
+      if (aiDjActive && lastTrackRef.current && !scrobbled && !isNearEnd) {
         reportAiDjSkipped(lastTrackRef.current)
       }
 
@@ -265,7 +294,7 @@ const Player = () => {
         setStartTime(null)
       }
     },
-    [scrobbled, startTime, aiDjActive, reportAiDjSkipped],
+    [scrobbled, startTime, aiDjActive, reportAiDjSkipped, audioInstance],
   )
 
   const onAudioPause = useCallback(
@@ -310,8 +339,8 @@ const Player = () => {
   }
 
   const handlers = useMemo(
-    () => keyHandlers(audioInstance, playerState),
-    [audioInstance, playerState],
+    () => (isSpeaking ? {} : keyHandlers(audioInstance, playerState)),
+    [audioInstance, playerState, isSpeaking],
   )
 
   useEffect(() => {

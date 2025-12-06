@@ -23,6 +23,11 @@ export const AIDJ_CLEAR_ERROR = 'AIDJ_CLEAR_ERROR'
 export const AIDJ_SAVE_PLAY_MODE = 'AIDJ_SAVE_PLAY_MODE'
 export const AIDJ_SET_PREFERENCES = 'AIDJ_SET_PREFERENCES'
 
+// TTS Action Types
+export const AIDJ_SPEECH_START = 'AIDJ_SPEECH_START'
+export const AIDJ_SPEECH_END = 'AIDJ_SPEECH_END'
+export const AIDJ_SPEECH_ERROR = 'AIDJ_SPEECH_ERROR'
+
 // Dialog Actions
 export const openAiDjDialog = (seedTrackId = null, seedArtistId = null) => ({
   type: AIDJ_DIALOG_OPEN,
@@ -116,4 +121,18 @@ export const aiDjSavePlayMode = (mode) => ({
 export const setAiDjPreferences = (preferences) => ({
   type: AIDJ_SET_PREFERENCES,
   preferences,
+})
+
+// TTS Action Creators
+export const aiDjSpeechStart = () => ({
+  type: AIDJ_SPEECH_START,
+})
+
+export const aiDjSpeechEnd = () => ({
+  type: AIDJ_SPEECH_END,
+})
+
+export const aiDjSpeechError = (error) => ({
+  type: AIDJ_SPEECH_ERROR,
+  payload: error,
 })
