@@ -367,6 +367,7 @@ type MediaFileRepository interface {
 	// The following methods are used by AI DJ enrichment:
 	CountUnenriched(tagKey string) (int64, error)
 	GetUnenriched(tagKey string, limit int) (MediaFiles, error)
+	ResetEnrichment(tagKey string) (int64, error)
 
 	// The following methods are used exclusively by the scanner:
 	MarkMissing(bool, ...*MediaFile) error

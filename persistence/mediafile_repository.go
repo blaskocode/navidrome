@@ -368,6 +368,17 @@ func (r *mediaFileRepository) GetUnenriched(tagKey string, limit int) (model.Med
 	return res.toModels(), nil
 }
 
+// ResetEnrichment clears the specified tag key from all tracks, allowing re-enrichment
+func (r *mediaFileRepository) ResetEnrichment(tagKey string) (int64, error) {
+	// Update all tracks by removing the specified tag key from the tags JSONB
+	// This uses json_remove to delete the key while preserving other tags
+	upd := Update("media_file").
+		Set("tags", Expr(fmt.Sprintf(`json_remove(tags, '$.%s')`, tagKey))).
+		Where(Expr(fmt.Sprintf(`json_extract(tags, '$.%s') IS NOT NULL`, tagKey)))
+
+	return r.executeSQL(upd)
+}
+
 func (r *mediaFileRepository) Search(q string, offset int, size int, options ...model.QueryOptions) (model.MediaFiles, error) {
 	var res dbMediaFiles
 	if uuid.Validate(q) == nil {

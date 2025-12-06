@@ -193,6 +193,9 @@ type aidjOptions struct {
 	MinimumEnrichmentPercent int
 	SetSizeMin               int
 	SetSizeMax               int
+	OpenAIEnabled            bool
+	OpenAIAPIKey             string
+	OpenAIModel              string
 }
 
 type secureOptions struct {
@@ -585,6 +588,9 @@ func setViperDefaults() {
 	viper.SetDefault("aidj.minimumenrichmentpercent", 25)
 	viper.SetDefault("aidj.setsizemin", 3)
 	viper.SetDefault("aidj.setsizemax", 5)
+	viper.SetDefault("aidj.openaienabled", false)
+	viper.SetDefault("aidj.openaiapikey", "")
+	viper.SetDefault("aidj.openaimodel", "gpt-4o-mini")
 	viper.SetDefault("httpsecurityheaders.customframeoptionsvalue", "DENY")
 	viper.SetDefault("backup.path", "")
 	viper.SetDefault("backup.schedule", "")

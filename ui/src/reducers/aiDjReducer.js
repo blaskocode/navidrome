@@ -28,6 +28,7 @@ const initialState = {
   sessionId: null,
   mode: null,
   upNext: [],
+  sets: [], // Pre-loaded sets with theme metadata
   chapterText: '',
   error: null,
   previousPlayMode: null,
@@ -72,6 +73,7 @@ export const aiDjReducer = (state = initialState, action) => {
         sessionId: action.payload.sessionId,
         mode: action.payload.mode,
         upNext: action.payload.upNext || [],
+        sets: action.payload.sets || [],
         chapterText: action.payload.chapterText || '',
         error: null,
       }
@@ -114,6 +116,7 @@ export const aiDjReducer = (state = initialState, action) => {
         ...state,
         loading: false,
         upNext: action.payload.upNext || [],
+        sets: action.payload.sets || state.sets,
         chapterText: action.payload.chapterText || state.chapterText,
         error: null,
       }

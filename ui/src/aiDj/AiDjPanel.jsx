@@ -24,11 +24,13 @@ const useStyles = makeStyles((theme) => ({
     position: 'fixed',
     right: 16,
     bottom: 100,
-    width: 300,
-    maxHeight: 400,
+    width: 320,
+    maxHeight: 500,
     overflow: 'auto',
     zIndex: 1000,
     backgroundColor: theme.palette.background.paper,
+    borderRadius: theme.shape.borderRadius,
+    boxShadow: theme.shadows[8],
   },
   header: {
     display: 'flex',
@@ -55,12 +57,39 @@ const useStyles = makeStyles((theme) => ({
     textAlign: 'center',
     padding: theme.spacing(1),
   },
+  setContainer: {
+    marginBottom: theme.spacing(1),
+  },
+  setHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: theme.spacing(0.5),
+  },
+  setTitle: {
+    fontWeight: 600,
+    color: theme.palette.primary.main,
+  },
+  setCommentary: {
+    fontStyle: 'italic',
+    fontSize: '0.85rem',
+    color: theme.palette.text.secondary,
+    marginBottom: theme.spacing(1),
+    paddingLeft: theme.spacing(1),
+    borderLeft: `2px solid ${theme.palette.primary.light}`,
+  },
+  setDivider: {
+    marginTop: theme.spacing(1.5),
+    marginBottom: theme.spacing(1.5),
+  },
 }))
 
 export const AiDjPanel = () => {
   const classes = useStyles()
   const translate = useTranslate()
   const { active, mode, chapterText, endSession } = useAiDj()
+
+  // Get sets from AI DJ state
+  const sets = useSelector((state) => state.aiDj?.sets || [])
 
   // Get the player queue and current position
   const playerQueue = useSelector((state) => state.player?.queue || [])
@@ -126,50 +155,121 @@ export const AiDjPanel = () => {
           </IconButton>
         </Box>
 
-        {chapterText && (
-          <Typography variant="body2" className={classes.chapterText}>
-            &ldquo;{chapterText}&rdquo;
-          </Typography>
-        )}
+        {/* Display sets with headers if available, otherwise show legacy chapterText */}
+        {sets.length > 0 ? (
+          <>
+            <Divider />
+            <Typography
+              variant="subtitle2"
+              gutterBottom
+              style={{ marginTop: 8 }}
+            >
+              {translate('resources.aiDj.upNext', { _: 'Up Next' })}
+            </Typography>
 
-        <Divider />
+            {sets.map((set, setIndex) => (
+              <Box
+                key={set.themeId + setIndex}
+                className={classes.setContainer}
+              >
+                {/* Set header */}
+                <Box className={classes.setHeader}>
+                  <Typography variant="subtitle2" className={classes.setTitle}>
+                    {set.isCurrent ? '▶ ' : ''}
+                    {set.themeName}
+                  </Typography>
+                </Box>
 
-        <Typography variant="subtitle2" gutterBottom style={{ marginTop: 8 }}>
-          {translate('resources.aiDj.upNext', { _: 'Up Next' })}
-        </Typography>
+                {/* Set commentary */}
+                {set.commentary && (
+                  <Typography variant="body2" className={classes.setCommentary}>
+                    &ldquo;{set.commentary}&rdquo;
+                  </Typography>
+                )}
 
-        <List dense className={classes.trackList}>
-          {upNextTracks.map((track, index) => (
-            <ListItem key={track.id || index} disableGutters>
-              <ListItemAvatar>
-                <Avatar
-                  src={subsonic.getCoverArtUrl(
-                    { id: track.albumId, updatedAt: track.updatedAt },
-                    40,
-                  )}
-                  variant="rounded"
-                  className={classes.trackAvatar}
-                />
-              </ListItemAvatar>
-              <ListItemText
-                primary={track.title}
-                secondary={track.artist}
-                primaryTypographyProps={{ noWrap: true }}
-                secondaryTypographyProps={{ noWrap: true }}
-              />
-            </ListItem>
-          ))}
-        </List>
+                {/* Set tracks */}
+                <List dense className={classes.trackList}>
+                  {set.tracks?.map((track, trackIndex) => (
+                    <ListItem key={track.id || trackIndex} disableGutters>
+                      <ListItemAvatar>
+                        <Avatar
+                          src={subsonic.getCoverArtUrl(
+                            { id: track.albumId, updatedAt: track.updatedAt },
+                            40,
+                          )}
+                          variant="rounded"
+                          className={classes.trackAvatar}
+                        />
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={track.title}
+                        secondary={track.artist}
+                        primaryTypographyProps={{ noWrap: true }}
+                        secondaryTypographyProps={{ noWrap: true }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
 
-        {remainingCount > 5 && (
-          <Typography
-            variant="caption"
-            color="textSecondary"
-            className={classes.moreText}
-          >
-            +{remainingCount - 5}{' '}
-            {translate('resources.aiDj.moreTracks', { _: 'more tracks' })}
-          </Typography>
+                {/* Divider between sets (except last) */}
+                {setIndex < sets.length - 1 && (
+                  <Divider className={classes.setDivider} />
+                )}
+              </Box>
+            ))}
+          </>
+        ) : (
+          <>
+            {chapterText && (
+              <Typography variant="body2" className={classes.chapterText}>
+                &ldquo;{chapterText}&rdquo;
+              </Typography>
+            )}
+
+            <Divider />
+
+            <Typography
+              variant="subtitle2"
+              gutterBottom
+              style={{ marginTop: 8 }}
+            >
+              {translate('resources.aiDj.upNext', { _: 'Up Next' })}
+            </Typography>
+
+            <List dense className={classes.trackList}>
+              {upNextTracks.map((track, index) => (
+                <ListItem key={track.id || index} disableGutters>
+                  <ListItemAvatar>
+                    <Avatar
+                      src={subsonic.getCoverArtUrl(
+                        { id: track.albumId, updatedAt: track.updatedAt },
+                        40,
+                      )}
+                      variant="rounded"
+                      className={classes.trackAvatar}
+                    />
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={track.title}
+                    secondary={track.artist}
+                    primaryTypographyProps={{ noWrap: true }}
+                    secondaryTypographyProps={{ noWrap: true }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+
+            {remainingCount > 5 && (
+              <Typography
+                variant="caption"
+                color="textSecondary"
+                className={classes.moreText}
+              >
+                +{remainingCount - 5}{' '}
+                {translate('resources.aiDj.moreTracks', { _: 'more tracks' })}
+              </Typography>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

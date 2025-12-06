@@ -2,6 +2,7 @@ package aidj
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -19,8 +20,13 @@ import (
 
 const (
 	enrichmentBatchSize    = 100
-	lastFMRateLimit        = 5 // requests per second
+	lastFMRateLimit        = 5  // requests per second
+	openAIRateLimit        = 10 // requests per second (adjust based on tier)
 	enrichmentInitialDelay = 30 * time.Second
+
+	// Concurrency settings for parallel enrichment
+	openAIConcurrency = 30 // Number of concurrent OpenAI requests
+	lastFMConcurrency = 5  // Number of concurrent Last.fm requests (matches their rate limit)
 )
 
 // lastFMClient interface for dependency injection in tests
@@ -28,11 +34,18 @@ type lastFMClient interface {
 	GetTrackTags(ctx context.Context, artist, track string, mbid string) ([]lastfm.TrackTag, error)
 }
 
+// openAIEnricher interface for dependency injection in tests
+type openAIEnricher interface {
+	EnrichTrack(ctx context.Context, mf *model.MediaFile) (*OpenAIEnrichmentResult, error)
+}
+
 // EnrichmentService handles background enrichment of track metadata
 type EnrichmentService struct {
-	ds           model.DataStore
-	lastFMClient lastFMClient
-	rateLimiter  *rate.Limiter
+	ds             model.DataStore
+	lastFMClient   lastFMClient
+	openAIEnricher openAIEnricher
+	rateLimiter    *rate.Limiter
+	openAILimiter  *rate.Limiter
 
 	// Progress tracking
 	totalTracks    atomic.Int64
@@ -47,12 +60,14 @@ type EnrichmentService struct {
 // NewEnrichmentService creates a new enrichment service
 func NewEnrichmentService(ds model.DataStore) *EnrichmentService {
 	var lfmClient lastFMClient
+	var openAI openAIEnricher
+
+	hc := &http.Client{
+		Timeout: consts.DefaultHttpClientTimeOut,
+	}
 
 	// Create Last.fm client if configured
 	if conf.Server.LastFM.Enabled && conf.Server.LastFM.ApiKey != "" {
-		hc := &http.Client{
-			Timeout: consts.DefaultHttpClientTimeOut,
-		}
 		cachedClient := cache.NewHTTPClient(hc, consts.DefaultHttpClientTimeOut)
 		lfmClient = lastfm.NewClient(
 			conf.Server.LastFM.ApiKey,
@@ -62,12 +77,23 @@ func NewEnrichmentService(ds model.DataStore) *EnrichmentService {
 		)
 	}
 
+	// Create OpenAI enricher if configured
+	if conf.Server.AIDj.OpenAIEnabled && conf.Server.AIDj.OpenAIAPIKey != "" {
+		openAI = NewOpenAIEnricher(
+			conf.Server.AIDj.OpenAIAPIKey,
+			conf.Server.AIDj.OpenAIModel,
+			hc,
+		)
+	}
+
 	return &EnrichmentService{
-		ds:           ds,
-		lastFMClient: lfmClient,
-		rateLimiter:  rate.NewLimiter(rate.Limit(lastFMRateLimit), 1),
-		shutdown:     make(chan struct{}),
-		done:         make(chan struct{}),
+		ds:             ds,
+		lastFMClient:   lfmClient,
+		openAIEnricher: openAI,
+		rateLimiter:    rate.NewLimiter(rate.Limit(lastFMRateLimit), 1),
+		openAILimiter:  rate.NewLimiter(rate.Limit(openAIRateLimit), 1),
+		shutdown:       make(chan struct{}),
+		done:           make(chan struct{}),
 	}
 }
 
@@ -110,8 +136,7 @@ func (s *EnrichmentService) Run(ctx context.Context) error {
 
 	log.Info(ctx, "Found tracks needing enrichment", "count", total)
 
-	// Process in batches
-	processed := int64(0)
+	// Process in batches with parallel workers
 	for {
 		select {
 		case <-ctx.Done():
@@ -131,32 +156,245 @@ func (s *EnrichmentService) Run(ctx context.Context) error {
 			break // No more tracks to process
 		}
 
-		for i := range batch {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-s.shutdown:
-				return nil
-			default:
-			}
+		// Process batch in parallel
+		s.processBatchParallel(ctx, batch)
 
-			if err := s.enrichTrack(ctx, &batch[i]); err != nil {
-				log.Warn(ctx, "Failed to enrich track", "track", batch[i].Title, "artist", batch[i].Artist, err)
-				// Continue with next track
-			}
-
-			processed++
-			s.enrichedTracks.Store(processed)
-
-			if processed%100 == 0 {
-				pct := int(float64(processed) / float64(total) * 100)
-				log.Info(ctx, "Enrichment progress", "processed", processed, "total", total, "percentage", pct)
-			}
+		processed := s.enrichedTracks.Load()
+		if processed%100 == 0 {
+			pct := int(float64(processed) / float64(total) * 100)
+			log.Info(ctx, "Enrichment progress", "processed", processed, "total", total, "percentage", pct)
 		}
 	}
 
-	log.Info(ctx, "AI DJ metadata enrichment complete", "processed", processed)
+	log.Info(ctx, "AI DJ metadata enrichment complete", "processed", s.enrichedTracks.Load())
 	return nil
+}
+
+// enrichmentJob represents a track to be enriched
+type enrichmentJob struct {
+	track *model.MediaFile
+	index int
+}
+
+// enrichmentResult holds the result of enriching a track
+type enrichmentResult struct {
+	track  *model.MediaFile
+	moods  []string
+	energy EnergyLevel
+	vibes  []string
+	source EnrichmentSource
+	err    error
+}
+
+// processBatchParallel processes a batch of tracks using parallel workers
+func (s *EnrichmentService) processBatchParallel(ctx context.Context, batch model.MediaFiles) {
+	// Channel for jobs to process
+	jobs := make(chan enrichmentJob, len(batch))
+
+	// Channel for tracks that need Last.fm fallback
+	lastFMFallback := make(chan enrichmentJob, len(batch))
+
+	// Channel for final results to save
+	results := make(chan enrichmentResult, len(batch))
+
+	// WaitGroup for OpenAI workers
+	var openAIWg sync.WaitGroup
+
+	// WaitGroup for Last.fm workers
+	var lastFMWg sync.WaitGroup
+
+	// Start OpenAI workers
+	for i := 0; i < openAIConcurrency; i++ {
+		openAIWg.Add(1)
+		go func() {
+			defer openAIWg.Done()
+			s.openAIWorker(ctx, jobs, lastFMFallback, results)
+		}()
+	}
+
+	// Start Last.fm workers
+	for i := 0; i < lastFMConcurrency; i++ {
+		lastFMWg.Add(1)
+		go func() {
+			defer lastFMWg.Done()
+			s.lastFMWorker(ctx, lastFMFallback, results)
+		}()
+	}
+
+	// Send all tracks to the job queue
+	go func() {
+		for i := range batch {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.shutdown:
+				return
+			case jobs <- enrichmentJob{track: &batch[i], index: i}:
+			}
+		}
+		close(jobs)
+	}()
+
+	// Wait for OpenAI workers to finish, then close Last.fm fallback channel
+	go func() {
+		openAIWg.Wait()
+		close(lastFMFallback)
+	}()
+
+	// Wait for Last.fm workers to finish, then close results channel
+	go func() {
+		lastFMWg.Wait()
+		close(results)
+	}()
+
+	// Collect and save results
+	for result := range results {
+		if result.err != nil {
+			log.Warn(ctx, "Failed to enrich track", "track", result.track.Title, "artist", result.track.Artist, "error", result.err)
+			continue
+		}
+
+		// Save enrichment data
+		if err := s.saveEnrichment(ctx, result); err != nil {
+			log.Warn(ctx, "Failed to save enrichment", "track", result.track.Title, "error", err)
+			continue
+		}
+
+		s.enrichedTracks.Add(1)
+	}
+}
+
+// openAIWorker processes tracks using OpenAI, sending failures to Last.fm fallback
+func (s *EnrichmentService) openAIWorker(ctx context.Context, jobs <-chan enrichmentJob, fallback chan<- enrichmentJob, results chan<- enrichmentResult) {
+	for job := range jobs {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.shutdown:
+			return
+		default:
+		}
+
+		mf := job.track
+		result := enrichmentResult{track: mf, source: EnrichmentSourceInferred}
+
+		// Try OpenAI if available
+		if s.openAIEnricher != nil && mf.Artist != "" && mf.Title != "" {
+			if err := s.openAILimiter.Wait(ctx); err != nil {
+				result.err = err
+				results <- result
+				continue
+			}
+
+			openAIResult, err := s.openAIEnricher.EnrichTrack(ctx, mf)
+			if err == nil && openAIResult != nil {
+				result.moods = []string{openAIResult.Mood}
+				result.energy = parseEnergyLevel(openAIResult.Energy)
+				result.vibes = openAIResult.Vibes
+				result.source = EnrichmentSourceOpenAI
+				log.Debug(ctx, "Enriched track via OpenAI", "track", mf.Title, "artist", mf.Artist, "mood", openAIResult.Mood)
+				results <- result
+				continue
+			}
+			log.Debug(ctx, "OpenAI enrichment failed, falling back", "track", mf.Title, "error", err)
+		}
+
+		// Send to Last.fm fallback queue
+		select {
+		case fallback <- job:
+		case <-ctx.Done():
+			return
+		case <-s.shutdown:
+			return
+		}
+	}
+}
+
+// lastFMWorker processes tracks using Last.fm, falling back to local inference
+func (s *EnrichmentService) lastFMWorker(ctx context.Context, jobs <-chan enrichmentJob, results chan<- enrichmentResult) {
+	for job := range jobs {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.shutdown:
+			return
+		default:
+		}
+
+		mf := job.track
+		result := enrichmentResult{track: mf, source: EnrichmentSourceInferred}
+
+		// Try Last.fm if available
+		if s.lastFMClient != nil && mf.Artist != "" && mf.Title != "" {
+			if err := s.rateLimiter.Wait(ctx); err != nil {
+				result.err = err
+				results <- result
+				continue
+			}
+
+			tags, err := s.lastFMClient.GetTrackTags(ctx, mf.Artist, mf.Title, mf.MbzRecordingID)
+			if err == nil && len(tags) > 0 {
+				lfmMoods, lfmVibes := parseLastFMTags(tags)
+				if len(lfmMoods) > 0 {
+					result.moods = lfmMoods
+					result.source = EnrichmentSourceLastFM
+				}
+				if len(lfmVibes) > 0 {
+					result.vibes = lfmVibes
+					if result.source != EnrichmentSourceLastFM {
+						result.source = EnrichmentSourceLastFM
+					}
+				}
+				log.Debug(ctx, "Enriched track via Last.fm", "track", mf.Title, "artist", mf.Artist, "moods", lfmMoods)
+			}
+		}
+
+		// Fall back to local inference if needed
+		if result.source == EnrichmentSourceInferred || len(result.moods) == 0 {
+			inferredMoods, inferredEnergy, inferredVibes := InferEnrichment(mf)
+			if len(result.moods) == 0 {
+				result.moods = inferredMoods
+			}
+			if result.energy == "" {
+				result.energy = inferredEnergy
+			}
+			if len(result.vibes) == 0 {
+				result.vibes = inferredVibes
+			}
+			if result.source == EnrichmentSourceInferred {
+				log.Debug(ctx, "Enriched track via local inference", "track", mf.Title, "moods", result.moods)
+			}
+		}
+
+		// Ensure energy is set
+		if result.energy == "" {
+			result.energy = inferEnergyFromBPM(mf.BPM)
+		}
+
+		results <- result
+	}
+}
+
+// saveEnrichment saves the enrichment result to the database
+func (s *EnrichmentService) saveEnrichment(ctx context.Context, result enrichmentResult) error {
+	mf := result.track
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if mf.Tags == nil {
+		mf.Tags = make(model.Tags)
+	}
+
+	if len(result.moods) > 0 {
+		mf.Tags[TagAIMood] = result.moods
+	}
+	mf.Tags[TagAIEnergy] = []string{string(result.energy)}
+	if len(result.vibes) > 0 {
+		mf.Tags[TagAIVibe] = result.vibes
+	}
+	mf.Tags[TagAISource] = []string{string(result.source)}
+	mf.Tags[TagAIEnrichedAt] = []string{now}
+
+	return s.ds.MediaFile(ctx).Put(mf)
 }
 
 // Stop gracefully stops the enrichment service
@@ -183,6 +421,26 @@ func (s *EnrichmentService) Status() EnrichmentStatus {
 	}
 }
 
+// ResetEnrichment clears enrichment data from all tracks, allowing re-enrichment
+// Returns the number of tracks that were reset
+func (s *EnrichmentService) ResetEnrichment(ctx context.Context) (int64, error) {
+	if s.inProgress.Load() {
+		return 0, fmt.Errorf("enrichment is currently in progress, please wait for it to complete")
+	}
+
+	count, err := s.ds.MediaFile(ctx).ResetEnrichment(TagAIEnrichedAt)
+	if err != nil {
+		return 0, err
+	}
+
+	// Reset progress counters so the next Run() starts fresh
+	s.totalTracks.Store(0)
+	s.enrichedTracks.Store(0)
+
+	log.Info(ctx, "Reset enrichment data", "tracksReset", count)
+	return count, nil
+}
+
 func (s *EnrichmentService) countUnenrichedTracks(ctx context.Context) (int64, error) {
 	return s.ds.MediaFile(ctx).CountUnenriched(TagAIEnrichedAt)
 }
@@ -191,52 +449,18 @@ func (s *EnrichmentService) getUnenrichedBatch(ctx context.Context, limit int) (
 	return s.ds.MediaFile(ctx).GetUnenriched(TagAIEnrichedAt, limit)
 }
 
-func (s *EnrichmentService) enrichTrack(ctx context.Context, mf *model.MediaFile) error {
-	// Start with local inference
-	moods, energy, vibes := InferEnrichment(mf)
-	source := EnrichmentSourceInferred
-
-	// Try Last.fm for additional tags if client is available
-	if s.lastFMClient != nil && mf.Artist != "" && mf.Title != "" {
-		// Wait for rate limiter
-		if err := s.rateLimiter.Wait(ctx); err != nil {
-			return err
-		}
-
-		tags, err := s.lastFMClient.GetTrackTags(ctx, mf.Artist, mf.Title, mf.MbzRecordingID)
-		if err == nil && len(tags) > 0 {
-			// Merge Last.fm tags with inferred data
-			lfmMoods, lfmVibes := parseLastFMTags(tags)
-			if len(lfmMoods) > 0 {
-				moods = mergeTags(moods, lfmMoods)
-				source = EnrichmentSourceLastFM
-			}
-			if len(lfmVibes) > 0 {
-				vibes = mergeTags(vibes, lfmVibes)
-				source = EnrichmentSourceLastFM
-			}
-		}
+// parseEnergyLevel converts string to EnergyLevel
+func parseEnergyLevel(s string) EnergyLevel {
+	switch strings.ToLower(s) {
+	case "low":
+		return EnergyLow
+	case "medium":
+		return EnergyMedium
+	case "high":
+		return EnergyHigh
+	default:
+		return ""
 	}
-
-	// Store enrichment data in tags
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	if mf.Tags == nil {
-		mf.Tags = make(model.Tags)
-	}
-
-	if len(moods) > 0 {
-		mf.Tags[TagAIMood] = moods
-	}
-	mf.Tags[TagAIEnergy] = []string{string(energy)}
-	if len(vibes) > 0 {
-		mf.Tags[TagAIVibe] = vibes
-	}
-	mf.Tags[TagAISource] = []string{string(source)}
-	mf.Tags[TagAIEnrichedAt] = []string{now}
-
-	// Save to database
-	return s.ds.MediaFile(ctx).Put(mf)
 }
 
 // parseLastFMTags categorizes Last.fm tags into moods and vibes
@@ -271,26 +495,6 @@ func parseLastFMTags(tags []lastfm.TrackTag) (moods []string, vibes []string) {
 	}
 
 	return moods, vibes
-}
-
-func mergeTags(existing, new []string) []string {
-	seen := make(map[string]bool)
-	result := make([]string, 0, len(existing)+len(new))
-
-	for _, t := range existing {
-		if !seen[t] {
-			seen[t] = true
-			result = append(result, t)
-		}
-	}
-	for _, t := range new {
-		if !seen[t] {
-			seen[t] = true
-			result = append(result, t)
-		}
-	}
-
-	return result
 }
 
 // Singleton pattern for status access from API

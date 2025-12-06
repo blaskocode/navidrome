@@ -177,6 +177,7 @@ func (c *CommentaryContext) yearToDecade(year int) string {
 }
 
 // findMostCommon returns the most common value from a count map
+// Returns empty string if no value appears more than once (no true "common" value)
 func (c *CommentaryContext) findMostCommon(counts map[string]int) string {
 	var maxKey string
 	var maxCount int
@@ -186,6 +187,11 @@ func (c *CommentaryContext) findMostCommon(counts map[string]int) string {
 			maxCount = count
 			maxKey = key
 		}
+	}
+
+	// Only return a value if it's actually common (appears more than once)
+	if maxCount <= 1 {
+		return ""
 	}
 
 	return maxKey

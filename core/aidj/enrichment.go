@@ -10,6 +10,7 @@ type EnrichmentSource string
 const (
 	EnrichmentSourceInferred EnrichmentSource = "inferred"
 	EnrichmentSourceLastFM   EnrichmentSource = "lastfm"
+	EnrichmentSourceOpenAI   EnrichmentSource = "openai"
 )
 
 // EnrichmentData represents AI-generated metadata for a track

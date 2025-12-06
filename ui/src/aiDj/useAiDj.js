@@ -16,13 +16,14 @@ import {
   clearAiDjError,
   aiDjSavePlayMode,
 } from '../actions'
-import { playTracks, setPlayMode } from '../actions/player'
+import { playTracks, setPlayMode, addTracks } from '../actions/player'
 import aiDjApi from './api'
 
 export const useAiDj = () => {
   const dispatch = useDispatch()
   const aiDj = useSelector((state) => state.aiDj || {})
   const playerMode = useSelector((state) => state.player?.mode || 'order')
+  const playerQueue = useSelector((state) => state.player?.queue || [])
 
   const startSession = useCallback(
     async (
@@ -52,7 +53,7 @@ export const useAiDj = () => {
             tracksById[track.id] = track
           })
 
-          // Save current play mode and set to orderLoop for circular queue
+          // Save current play mode and set to orderLoop for continuous playback
           dispatch(aiDjSavePlayMode(playerMode))
           dispatch(setPlayMode('orderLoop'))
 
@@ -102,13 +103,40 @@ export const useAiDj = () => {
       try {
         const state = await aiDjApi.next(aiDj.sessionId, playedTrackId)
         dispatch(nextTrackSuccess(state))
+
+        // Sync player queue with backend state
+        // The backend returns the full queue of remaining tracks across all sets
+        if (state.upNext && state.upNext.length > 0) {
+          // Get current player track IDs
+          const currentTrackIds = new Set(
+            playerQueue.map((item) => item.trackId),
+          )
+
+          // Check if there are any new tracks we don't have
+          const hasNewTracks = state.upNext.some(
+            (track) => !currentTrackIds.has(track.id),
+          )
+
+          // If there are new tracks, add them to keep the queue growing
+          if (hasNewTracks) {
+            const newTracks = state.upNext.filter(
+              (track) => !currentTrackIds.has(track.id),
+            )
+            const newTracksById = {}
+            newTracks.forEach((track) => {
+              newTracksById[track.id] = track
+            })
+            dispatch(addTracks(newTracksById, Object.keys(newTracksById)))
+          }
+        }
+
         return state
       } catch (error) {
         dispatch(nextTrackFailure(error.message || 'Failed to get next track'))
         throw error
       }
     },
-    [dispatch, aiDj.sessionId],
+    [dispatch, aiDj.sessionId, playerQueue],
   )
 
   const skipTrack = useCallback(
@@ -119,13 +147,35 @@ export const useAiDj = () => {
       try {
         const state = await aiDjApi.skip(aiDj.sessionId, skippedTrackId)
         dispatch(skipTrackSuccess(state))
+
+        // Add any new tracks to the player queue that aren't already there
+        if (state.upNext && state.upNext.length > 0) {
+          // Get current player track IDs
+          const currentTrackIds = new Set(
+            playerQueue.map((item) => item.trackId),
+          )
+
+          // Find tracks that are new (not in current player queue)
+          const newTracks = state.upNext.filter(
+            (track) => !currentTrackIds.has(track.id),
+          )
+
+          if (newTracks.length > 0) {
+            const newTracksById = {}
+            newTracks.forEach((track) => {
+              newTracksById[track.id] = track
+            })
+            dispatch(addTracks(newTracksById, Object.keys(newTracksById)))
+          }
+        }
+
         return state
       } catch (error) {
         dispatch(skipTrackFailure(error.message || 'Failed to skip track'))
         throw error
       }
     },
-    [dispatch, aiDj.sessionId],
+    [dispatch, aiDj.sessionId, playerQueue],
   )
 
   const clearError = useCallback(() => {

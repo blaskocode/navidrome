@@ -48,20 +48,145 @@ var GenreMoodMapping = map[string]struct {
 	"pop":               {[]string{"upbeat"}, []string{}},
 }
 
-// InferEnrichment derives mood, energy, and vibe from BPM and genre
+// titleMoodKeywords maps title keywords to mood overrides
+// These take precedence over genre-based inference
+var titleMoodKeywords = map[string][]string{
+	// Soft/mellow indicators
+	"acoustic":  {"soft"},
+	"unplugged": {"soft"},
+	"piano":     {"soft"},
+	"ballad":    {"soft"},
+	"slow":      {"soft"},
+	"gentle":    {"soft"},
+	"quiet":     {"soft"},
+	"stripped":  {"soft"},
+	"solo":      {"soft"},
+	"lullaby":   {"soft"},
+
+	// Live performances - clear genre default, rely on BPM
+	"live at":   {},
+	"live on":   {},
+	"live in":   {},
+	"concert":   {},
+	"(live)":    {},
+	"- live":    {},
+	"live from": {},
+
+	// Upbeat/energetic indicators
+	"remix":      {"upbeat"},
+	"club mix":   {"upbeat"},
+	"dance mix":  {"upbeat"},
+	"party":      {"upbeat"},
+	"radio edit": {"upbeat"},
+
+	// Intense indicators
+	"metal":    {"intense"},
+	"hardcore": {"intense"},
+	"heavy":    {"intense"},
+	"scream":   {"intense"},
+}
+
+// albumMoodKeywords maps album name keywords to mood hints
+var albumMoodKeywords = map[string][]string{
+	"acoustic":   {"soft"},
+	"unplugged":  {"soft"},
+	"sessions":   {"soft"},
+	"stripped":   {"soft"},
+	"piano":      {"soft"},
+	"live at":    {}, // Defer to BPM
+	"live in":    {},
+	"live from":  {},
+	"in concert": {},
+}
+
+// InferEnrichment derives mood, energy, and vibe from BPM, title, album, and genre
 func InferEnrichment(mf *model.MediaFile) (moods []string, energy EnergyLevel, vibes []string) {
-	// Infer energy from BPM
+	// Infer energy from BPM first
 	energy = inferEnergyFromBPM(mf.BPM)
 
-	// Get genre-based defaults
-	moods, vibes = inferFromGenre(mf.Genre)
+	// Check title for mood overrides BEFORE genre (highest priority)
+	titleMoods, titleCleared := inferFromTitle(mf.Title)
+	if len(titleMoods) > 0 {
+		moods = titleMoods
+	} else if !titleCleared {
+		// Check album name for hints (second priority)
+		albumMoods, albumCleared := inferFromAlbum(mf.Album)
+		if len(albumMoods) > 0 {
+			moods = albumMoods
+		} else if !albumCleared {
+			// Fall back to genre-based inference (lowest priority)
+			moods, vibes = inferFromGenre(mf.Genre)
+		}
+	}
 
-	// Adjust moods based on energy if genre didn't provide strong signal
+	// BPM override: Very slow songs should be "soft" regardless of genre
+	// This catches cases like slow pop ballads tagged as "upbeat" due to genre
+	if mf.BPM > 0 && mf.BPM < 80 {
+		if !containsMood(moods, "soft", "chill", "calm", "melancholy") {
+			moods = []string{"soft"}
+		}
+	}
+
+	// Adjust moods based on energy if still empty
 	if len(moods) == 0 {
 		moods = inferMoodsFromEnergy(energy)
 	}
 
 	return moods, energy, vibes
+}
+
+// inferFromTitle checks the title for mood-indicating keywords
+// Returns moods and a "cleared" flag (true if we matched a "live" keyword that clears genre defaults)
+func inferFromTitle(title string) (moods []string, cleared bool) {
+	if title == "" {
+		return nil, false
+	}
+
+	normalized := strings.ToLower(title)
+
+	for keyword, keywordMoods := range titleMoodKeywords {
+		if strings.Contains(normalized, keyword) {
+			if len(keywordMoods) == 0 {
+				// Empty moods means "clear genre default, use BPM"
+				return nil, true
+			}
+			return keywordMoods, false
+		}
+	}
+
+	return nil, false
+}
+
+// inferFromAlbum checks the album name for mood-indicating keywords
+func inferFromAlbum(album string) (moods []string, cleared bool) {
+	if album == "" {
+		return nil, false
+	}
+
+	normalized := strings.ToLower(album)
+
+	for keyword, keywordMoods := range albumMoodKeywords {
+		if strings.Contains(normalized, keyword) {
+			if len(keywordMoods) == 0 {
+				return nil, true
+			}
+			return keywordMoods, false
+		}
+	}
+
+	return nil, false
+}
+
+// containsMood checks if any of the target moods are in the moods slice
+func containsMood(moods []string, targets ...string) bool {
+	for _, mood := range moods {
+		for _, target := range targets {
+			if mood == target {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func inferEnergyFromBPM(bpm int) EnergyLevel {

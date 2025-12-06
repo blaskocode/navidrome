@@ -39,6 +39,7 @@ func (api *Router) routes() http.Handler {
 	r.Post("/skip", api.skip)
 	r.Post("/end", api.endSession)
 	r.Get("/enrichment/status", api.getEnrichmentStatus)
+	r.Post("/enrichment/reset", api.resetEnrichment)
 
 	// Theme endpoints
 	r.Get("/themes", api.listThemes)
@@ -286,8 +287,30 @@ func (api *Router) getEnrichmentStatus(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, status)
 }
 
+func (api *Router) resetEnrichment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	es := aidj.GetEnrichmentService(api.ds)
+	if es == nil {
+		http.Error(w, "enrichment service not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	count, err := es.ResetEnrichment(ctx)
+	if err != nil {
+		log.Error(ctx, "Failed to reset enrichment", err)
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"message":     "Enrichment data reset successfully. Re-enrichment will begin automatically.",
+		"tracksReset": count,
+	})
+}
+
 func (api *Router) buildState(ctx context.Context, session *model.DJSession) (*model.DJState, error) {
-	log.Debug(ctx, "buildState called", "sessionID", session.ID, "queueLen", len(session.Queue), "queue", session.Queue)
+	log.Debug(ctx, "buildState called", "sessionID", session.ID, "queueLen", len(session.Queue), "numSets", len(session.QueuedSets))
 
 	state := &model.DJState{
 		SessionID:    session.ID,
@@ -317,17 +340,48 @@ func (api *Router) buildState(ctx context.Context, session *model.DJSession) (*m
 		}
 	}
 
-	// Load full track data for queue
-	for _, trackID := range session.Queue {
-		track, err := api.ds.MediaFile(ctx).Get(trackID)
-		if err != nil {
-			log.Warn(ctx, "Could not load track", "trackID", trackID, err)
-			continue // Skip tracks that no longer exist
+	// Include queued sets with full metadata
+	if len(session.QueuedSets) > 0 {
+		state.Sets = make([]model.QueuedSet, len(session.QueuedSets))
+		for i, qs := range session.QueuedSets {
+			// Copy set info and load fresh track data
+			state.Sets[i] = model.QueuedSet{
+				ThemeID:    qs.ThemeID,
+				ThemeName:  qs.ThemeName,
+				TrackIDs:   qs.TrackIDs,
+				Tracks:     make([]model.MediaFile, 0, len(qs.TrackIDs)),
+				Commentary: qs.Commentary,
+				IsCurrent:  qs.IsCurrent,
+			}
+
+			// Load track data for each set
+			for _, trackID := range qs.TrackIDs {
+				track, err := api.ds.MediaFile(ctx).Get(trackID)
+				if err != nil {
+					log.Warn(ctx, "Could not load track for set", "trackID", trackID, err)
+					continue
+				}
+				state.Sets[i].Tracks = append(state.Sets[i].Tracks, *track)
+			}
 		}
-		state.UpNext = append(state.UpNext, *track)
+
+		// Build UpNext from sets if we have them
+		for _, set := range state.Sets {
+			state.UpNext = append(state.UpNext, set.Tracks...)
+		}
+	} else {
+		// Load full track data for queue (legacy path)
+		for _, trackID := range session.Queue {
+			track, err := api.ds.MediaFile(ctx).Get(trackID)
+			if err != nil {
+				log.Warn(ctx, "Could not load track", "trackID", trackID, err)
+				continue // Skip tracks that no longer exist
+			}
+			state.UpNext = append(state.UpNext, *track)
+		}
 	}
 
-	log.Debug(ctx, "buildState complete", "upNextLen", len(state.UpNext))
+	log.Debug(ctx, "buildState complete", "upNextLen", len(state.UpNext), "numSets", len(state.Sets))
 	return state, nil
 }
 

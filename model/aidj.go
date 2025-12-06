@@ -47,11 +47,24 @@ type DJSession struct {
 	CurrentSetPlayed int             // tracks played in current set
 	SetStartTime     time.Time       // when current set started (for decay)
 
+	// Pre-loaded sets for continuous playback
+	QueuedSets []QueuedSet `json:"-"` // Not serialized directly, exposed via DJState
+
 	// Autonomous mode flag
 	AutonomousMode bool // true if DJ is selecting themes autonomously
 
 	// User preferences for track filtering
 	UserPreferences *UserPreferences `json:"userPreferences,omitempty"`
+}
+
+// QueuedSet represents a pre-built themed set ready for playback
+type QueuedSet struct {
+	ThemeID    string      `json:"themeId"`
+	ThemeName  string      `json:"themeName"`
+	TrackIDs   []string    `json:"trackIds"`
+	Tracks     []MediaFile `json:"tracks"`
+	Commentary string      `json:"commentary"`
+	IsCurrent  bool        `json:"isCurrent"` // true if this is the actively playing set
 }
 
 type DJState struct {
@@ -61,15 +74,18 @@ type DJState struct {
 	UpNext      []MediaFile `json:"upNext"`
 	ChapterText string      `json:"chapterText,omitempty"`
 
-	// Theme fields
+	// Theme fields (current set)
 	ThemeID   string `json:"themeId,omitempty"`
 	ThemeName string `json:"themeName,omitempty"`
 
-	// Set progress info (Phase C)
+	// Set progress info
 	SetProgress  int  `json:"setProgress,omitempty"`  // tracks played in current set
 	SetSize      int  `json:"setSize,omitempty"`      // total tracks in current set
 	IsAutonomous bool `json:"isAutonomous,omitempty"` // true if autonomous mode
 	IsExhausted  bool `json:"isExhausted,omitempty"`  // true if library is exhausted
+
+	// Pre-loaded sets with metadata
+	Sets []QueuedSet `json:"sets,omitempty"`
 }
 
 func (m DJMode) IsValid() bool {
