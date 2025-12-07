@@ -278,6 +278,9 @@
       "title": "AI DJ",
       "description": "AI DJ will create a personalized radio from your library based on your listening history.",
       "prompt": "I want to hear...",
+      "promptLabel": "What kind of music are you in the mood for?",
+      "promptPlaceholder": "e.g., \"soft acoustic songs\" or \"upbeat 90s favorites\"",
+      "starting": "Starting...",
       "mode": "Mode",
       "modes": {
         "default": "Default - Mix of favorites and discoveries",

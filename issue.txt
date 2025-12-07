@@ -1,0 +1,92 @@
+# AI DJ Natural Language Prompt Input
+
+**Status: IMPLEMENTED**
+
+## Summary
+
+Replace the structured Energy/Context dropdown UI for starting AI DJ sessions with a natural language text input field. An LLM interprets the user's prompt and maps it to the existing structured parameters.
+
+## Current Behavior
+
+- User clicks AI DJ icon
+- UI presents dropdowns for Energy (soft, medium, high) and Context (my favorites, recent history, etc.)
+- Structured selections drive the first session
+- Subsequent sessions have their own continuity logic
+
+## Proposed Behavior
+
+- User clicks AI DJ icon
+- UI presents a single text input field
+- Field is pre-populated with a random example prompt (e.g., "Chill acoustic vibes", "Upbeat songs from my recent plays")
+- User can either:
+  - Accept the auto-filled prompt and start
+  - Replace it with their own natural language request (e.g., "soft songs like Switchfoot")
+- On submit, OpenAI interprets the prompt and maps it to structured parameters
+- Session starts silently (no confirmation of what was interpreted)
+- If a session is already active, clicking the AI DJ icon shows the same prompt UI - submitting ends the current session and starts a fresh one
+
+## Technical Approach
+
+LLM as prompt interpreter:
+
+```
+User input: "soft songs like Switchfoot"
+           ↓
+      OpenAI call
+           ↓
+Structured output: {
+  energy: "soft",
+  context: "all",
+  genre_hints: ["alternative rock", "acoustic", "christian rock"],
+  artist_hints: ["Switchfoot", "Needtobreathe", "Jon Foreman"],
+  decade_hints: null,
+  mood_hints: ["emotional", "reflective"]
+}
+           ↓
+Existing session logic uses energy + context as before
+Genre/artist/mood hints can be used for optional filtering (extensible for future)
+```
+
+## Auto-fill Prompt Examples
+
+- "Chill acoustic vibes"
+- "Upbeat songs from my recent plays"
+- "High energy workout music"
+- "Mellow favorites from the 90s"
+- "Something fresh I haven't heard in a while"
+
+## What Changes
+
+- Energy/Context dropdown UI → single text input field
+- New OpenAI call to interpret prompt into structured parameters
+- UI behavior when session is active (show prompt UI instead of blocking)
+
+## What Does NOT Change
+
+- How sessions select songs once started
+- How subsequent sessions work (continuity tracking)
+- Commentary generation
+- Any other AI DJ behavior
+
+## Notes
+
+- Single OpenAI call at session start (latency acceptable)
+- Silent start - no user-facing confirmation of interpreted parameters
+- Schema is extensible (genre/artist/mood hints can enhance selection later, not required for v1)
+
+---
+
+## Implementation Details
+
+**Files Created:**
+- `core/aidj/prompt_interpreter.go` - OpenAI-based prompt interpreter
+
+**Files Modified:**
+- `server/aidj/router.go` - Added `POST /api/ai-dj/interpret-prompt` endpoint
+- `ui/src/aiDj/api.js` - Added `interpretPrompt()` API method
+- `ui/src/dialogs/AiDjDialog.jsx` - Replaced dropdowns with text input
+- `ui/src/i18n/en.json` - Added new translation keys
+
+**Documentation:**
+- Research: `thoughts/shared/research/2025-12-06-ai-dj-natural-language-prompt.md`
+- Plan: `thoughts/shared/plans/2025-12-06-ai-dj-natural-language-prompt.md`

@@ -70,6 +70,15 @@ const aiDjApi = {
     })
   },
 
+  // Interpret natural language prompt into structured preferences
+  interpretPrompt: async (prompt) => {
+    const response = await httpClient(baseUrl(`${API_BASE}/interpret-prompt`), {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    })
+    return response.json
+  },
+
   // Fetch TTS audio for the provided commentary text
   getCommentaryAudio: async (text) => {
     return fetchAudio(

@@ -50,6 +50,9 @@ func (api *Router) routes() http.Handler {
 	// TTS endpoint
 	r.Get("/commentary-audio", api.getCommentaryAudio)
 
+	// Prompt interpretation endpoint
+	r.Post("/interpret-prompt", api.interpretPrompt)
+
 	return r
 }
 
@@ -61,6 +64,19 @@ type startRequest struct {
 	ThemeID        *string                `json:"themeId,omitempty"`
 	Autonomous     bool                   `json:"autonomous,omitempty"`  // explicit autonomous flag
 	Preferences    *model.UserPreferences `json:"preferences,omitempty"` // user preference filters
+}
+
+type interpretPromptRequest struct {
+	Prompt string `json:"prompt"`
+}
+
+type interpretPromptResponse struct {
+	Energy      *string  `json:"energy"`
+	Decade      *int     `json:"decade"`
+	Contexts    []string `json:"contexts"`
+	GenreHints  []string `json:"genreHints,omitempty"`
+	ArtistHints []string `json:"artistHints,omitempty"`
+	MoodHints   []string `json:"moodHints,omitempty"`
 }
 
 func (api *Router) startSession(w http.ResponseWriter, r *http.Request) {
@@ -489,4 +505,62 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
+}
+
+// interpretPrompt interprets a natural language prompt into structured preferences
+func (api *Router) interpretPrompt(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req interpretPromptRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Prompt == "" {
+		http.Error(w, "prompt is required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if OpenAI is enabled
+	if !conf.Server.AIDj.OpenAIEnabled || conf.Server.AIDj.OpenAIAPIKey == "" {
+		// Fallback to default preferences
+		log.Debug(ctx, "OpenAI not enabled, returning default preferences")
+		defaults := aidj.DefaultPreferences()
+		respondJSON(w, http.StatusOK, interpretPromptResponse{
+			Energy:   defaults.Energy,
+			Decade:   defaults.Decade,
+			Contexts: defaults.Contexts,
+		})
+		return
+	}
+
+	// Interpret the prompt
+	interpreter := aidj.NewPromptInterpreter(
+		conf.Server.AIDj.OpenAIAPIKey,
+		conf.Server.AIDj.OpenAIModel,
+		http.DefaultClient,
+	)
+
+	result, err := interpreter.Interpret(ctx, req.Prompt)
+	if err != nil {
+		log.Error(ctx, "Failed to interpret prompt, using defaults", "error", err, "prompt", req.Prompt)
+		// Fallback to default preferences on error
+		defaults := aidj.DefaultPreferences()
+		respondJSON(w, http.StatusOK, interpretPromptResponse{
+			Energy:   defaults.Energy,
+			Decade:   defaults.Decade,
+			Contexts: defaults.Contexts,
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, interpretPromptResponse{
+		Energy:      result.Energy,
+		Decade:      result.Decade,
+		Contexts:    result.Contexts,
+		GenreHints:  result.GenreHints,
+		ArtistHints: result.ArtistHints,
+		MoodHints:   result.MoodHints,
+	})
 }

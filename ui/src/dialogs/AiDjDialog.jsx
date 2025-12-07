@@ -1,20 +1,12 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogActions,
   DialogContent,
   Button,
-  FormControl,
-  FormLabel,
-  RadioGroup,
-  FormControlLabel,
-  Radio,
-  FormGroup,
-  Checkbox,
-  Select,
-  MenuItem,
+  TextField,
   Typography,
-  Box,
+  CircularProgress,
   makeStyles,
 } from '@material-ui/core'
 import { useTranslate } from 'react-admin'
@@ -22,118 +14,109 @@ import { useSelector, useDispatch } from 'react-redux'
 import { DialogTitle } from './DialogTitle'
 import { closeAiDjDialog } from '../actions'
 import { useAiDj } from '../aiDj/useAiDj'
+import aiDjApi from '../aiDj/api'
 
 const useStyles = makeStyles((theme) => ({
   prompt: {
-    marginBottom: theme.spacing(3),
+    marginBottom: theme.spacing(2),
     fontStyle: 'italic',
     color: theme.palette.text.secondary,
   },
-  section: {
+  textField: {
     marginBottom: theme.spacing(2),
-  },
-  contextRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing(1),
-  },
-  decadeSelect: {
-    minWidth: 100,
   },
   seedInfo: {
     marginTop: theme.spacing(2),
     fontStyle: 'italic',
   },
+  loadingContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing(1),
+  },
 }))
 
-const ENERGY_OPTIONS = [
-  {
-    value: 'upbeat',
-    labelKey: 'resources.aiDj.energy.upbeat',
-    fallback: 'upbeat',
-  },
-  { value: 'soft', labelKey: 'resources.aiDj.energy.soft', fallback: 'soft' },
-  {
-    value: 'intense',
-    labelKey: 'resources.aiDj.energy.intense',
-    fallback: 'intense',
-  },
-  { value: '', labelKey: 'resources.aiDj.energy.any', fallback: 'any mood' },
+const AUTO_FILL_PROMPTS = [
+  'Chill acoustic vibes',
+  'Upbeat songs from my recent plays',
+  'High energy workout music',
+  'Mellow favorites from the 90s',
+  "Something fresh I haven't heard in a while",
+  'Soft indie folk songs',
+  'Energetic dance tracks',
+  'Relaxing late night music',
+  'Classic rock from the 80s',
+  'My forgotten favorites',
 ]
 
-const DECADE_OPTIONS = [
-  { value: 1960, label: '60s' },
-  { value: 1970, label: '70s' },
-  { value: 1980, label: '80s' },
-  { value: 1990, label: '90s' },
-  { value: 2000, label: '2000s' },
-  { value: 2010, label: '2010s' },
-  { value: 2020, label: '2020s' },
-]
+const getRandomPrompt = () => {
+  return AUTO_FILL_PROMPTS[Math.floor(Math.random() * AUTO_FILL_PROMPTS.length)]
+}
 
 export const AiDjDialog = () => {
   const classes = useStyles()
   const translate = useTranslate()
   const dispatch = useDispatch()
-  const { dialogOpen, seedTrackId, seedArtistId, loading } = useSelector(
-    (state) => state.aiDj,
-  )
-  const { startSession } = useAiDj()
+  const { dialogOpen, seedTrackId, seedArtistId, loading, active, sessionId } =
+    useSelector((state) => state.aiDj)
+  const { startSession, endSession } = useAiDj()
 
-  // Preference state - resets each time dialog opens
-  const [energy, setEnergy] = useState('')
-  const [decadeEnabled, setDecadeEnabled] = useState(false)
-  const [decade, setDecade] = useState(1990)
-  const [contexts, setContexts] = useState({
-    forgotten: false,
-    favorites: false,
-    new: false,
-  })
+  const [prompt, setPrompt] = useState('')
+  const [interpreting, setInterpreting] = useState(false)
+
+  // Set random prompt when dialog opens
+  useEffect(() => {
+    if (dialogOpen) {
+      setPrompt(getRandomPrompt())
+    }
+  }, [dialogOpen])
 
   const handleClose = () => {
     dispatch(closeAiDjDialog())
-    // Reset state when closing
-    setEnergy('')
-    setDecadeEnabled(false)
-    setDecade(1990)
-    setContexts({ forgotten: false, favorites: false, new: false })
+    setPrompt('')
+    setInterpreting(false)
   }
 
-  const handleStart = () => {
-    const selectedContexts = Object.entries(contexts)
-      .filter(([, enabled]) => enabled)
-      .map(([key]) => key)
+  const handleStart = async () => {
+    setInterpreting(true)
 
-    const preferences = {
-      energy: energy || null,
-      decade: decadeEnabled ? decade : null,
-      contexts: selectedContexts,
-    }
-
-    // Only pass preferences if any are set
-    const hasPreferences =
-      energy || decadeEnabled || selectedContexts.length > 0
-    startSession(
-      null,
-      seedTrackId,
-      seedArtistId,
-      null,
-      hasPreferences ? preferences : null,
-    )
-  }
-
-  const toggleContext = (key) => {
-    setContexts((prev) => {
-      const newContexts = { ...prev, [key]: !prev[key] }
-      // Mutually exclusive: favorites and new cannot both be selected
-      if (key === 'favorites' && newContexts.favorites) {
-        newContexts.new = false
-      } else if (key === 'new' && newContexts.new) {
-        newContexts.favorites = false
+    try {
+      // If there's an active session, end it first
+      if (active && sessionId) {
+        await endSession()
       }
-      return newContexts
-    })
+
+      // Interpret the prompt
+      const preferences = await aiDjApi.interpretPrompt(prompt)
+
+      // Build preferences object for startSession
+      const prefs = {
+        energy: preferences.energy || null,
+        decade: preferences.decade || null,
+        contexts: preferences.contexts || [],
+      }
+
+      // Check if any preferences were set
+      const hasPreferences =
+        prefs.energy || prefs.decade || prefs.contexts.length > 0
+
+      // Start the session with interpreted preferences
+      startSession(
+        null,
+        seedTrackId,
+        seedArtistId,
+        null,
+        hasPreferences ? prefs : null,
+      )
+    } catch {
+      // Fallback: start with no preferences
+      startSession(null, seedTrackId, seedArtistId, null, null)
+    } finally {
+      setInterpreting(false)
+    }
   }
+
+  const isLoading = loading || interpreting
 
   return (
     <Dialog
@@ -148,102 +131,24 @@ export const AiDjDialog = () => {
       </DialogTitle>
       <DialogContent>
         <Typography variant="body1" className={classes.prompt}>
-          {translate('resources.aiDj.prompt', {
-            _: 'I want to hear...',
+          {translate('resources.aiDj.promptLabel', {
+            _: 'What kind of music are you in the mood for?',
           })}
         </Typography>
 
-        {/* Energy Selection */}
-        <FormControl component="fieldset" className={classes.section}>
-          <FormLabel component="legend">
-            {translate('resources.aiDj.energy.label', { _: 'Energy' })}
-          </FormLabel>
-          <RadioGroup
-            value={energy}
-            onChange={(e) => setEnergy(e.target.value)}
-            row
-          >
-            {ENERGY_OPTIONS.map((opt) => (
-              <FormControlLabel
-                key={opt.value || 'any'}
-                value={opt.value}
-                control={<Radio />}
-                label={translate(opt.labelKey, { _: opt.fallback })}
-              />
-            ))}
-          </RadioGroup>
-        </FormControl>
-
-        {/* Context Selection */}
-        <FormControl component="fieldset" className={classes.section}>
-          <FormLabel component="legend">
-            {translate('resources.aiDj.context.label', { _: 'Context' })}
-          </FormLabel>
-          <FormGroup>
-            {/* Decade context */}
-            <Box className={classes.contextRow}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={decadeEnabled}
-                    onChange={() => setDecadeEnabled(!decadeEnabled)}
-                  />
-                }
-                label={translate('resources.aiDj.context.fromThe', {
-                  _: 'from the',
-                })}
-              />
-              <Select
-                value={decade}
-                onChange={(e) => setDecade(e.target.value)}
-                disabled={!decadeEnabled}
-                className={classes.decadeSelect}
-                variant="outlined"
-                size="small"
-              >
-                {DECADE_OPTIONS.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </Box>
-
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={contexts.forgotten}
-                  onChange={() => toggleContext('forgotten')}
-                />
-              }
-              label={translate('resources.aiDj.context.forgotten', {
-                _: "haven't heard in a while",
-              })}
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={contexts.favorites}
-                  onChange={() => toggleContext('favorites')}
-                />
-              }
-              label={translate('resources.aiDj.context.favorites', {
-                _: 'my favorites',
-              })}
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={contexts.new}
-                  onChange={() => toggleContext('new')}
-                />
-              }
-              label={translate('resources.aiDj.context.new', {
-                _: 'something new to me',
-              })}
-            />
-          </FormGroup>
-        </FormControl>
+        <TextField
+          fullWidth
+          multiline
+          rows={2}
+          variant="outlined"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={translate('resources.aiDj.promptPlaceholder', {
+            _: 'e.g., "soft acoustic songs" or "upbeat 90s favorites"',
+          })}
+          className={classes.textField}
+          disabled={isLoading}
+        />
 
         {(seedTrackId || seedArtistId) && (
           <Typography
@@ -258,16 +163,23 @@ export const AiDjDialog = () => {
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose} color="primary">
+        <Button onClick={handleClose} color="primary" disabled={isLoading}>
           {translate('ra.action.cancel')}
         </Button>
         <Button
           onClick={handleStart}
           color="primary"
           variant="contained"
-          disabled={loading}
+          disabled={isLoading || !prompt.trim()}
         >
-          {translate('resources.aiDj.start', { _: 'Start DJ' })}
+          {isLoading ? (
+            <span className={classes.loadingContainer}>
+              <CircularProgress size={16} color="inherit" />
+              {translate('resources.aiDj.starting', { _: 'Starting...' })}
+            </span>
+          ) : (
+            translate('resources.aiDj.start', { _: 'Start DJ' })
+          )}
         </Button>
       </DialogActions>
     </Dialog>
