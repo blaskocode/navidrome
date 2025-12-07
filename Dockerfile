@@ -81,11 +81,15 @@ ENV ND_CONFIGFILE=/data/navidrome.toml
 ENV ND_PORT=4533
 RUN mkdir -p /data/music && touch /.nddockerenv
 
-# Copy sample music files to a staging area (not /data, which gets overwritten by volume)
-RUN mkdir -p /sample-music/Sample\ Artist/Sample\ Album
-COPY tests/fixtures/artist/an-album/test.mp3 /sample-music/Sample\ Artist/Sample\ Album/01\ -\ Test\ Song.mp3
-COPY tests/fixtures/test.mp3 /sample-music/Sample\ Artist/Sample\ Album/02\ -\ Another\ Song.mp3
-COPY tests/fixtures/no_replaygain.mp3 /sample-music/Sample\ Artist/Sample\ Album/03\ -\ Third\ Track.mp3
+# Copy sample music files to staging area, then organize them with proper folder structure
+COPY tests/fixtures/artist/an-album/test.mp3 /sample-staging/01.mp3
+COPY tests/fixtures/test.mp3 /sample-staging/02.mp3
+COPY tests/fixtures/no_replaygain.mp3 /sample-staging/03.mp3
+RUN mkdir -p "/sample-music/Sample Artist/Sample Album" && \
+    mv /sample-staging/01.mp3 "/sample-music/Sample Artist/Sample Album/01 - Test Song.mp3" && \
+    mv /sample-staging/02.mp3 "/sample-music/Sample Artist/Sample Album/02 - Another Song.mp3" && \
+    mv /sample-staging/03.mp3 "/sample-music/Sample Artist/Sample Album/03 - Third Track.mp3" && \
+    rm -rf /sample-staging
 
 # Create startup script that copies sample files if music folder is empty
 RUN echo '#!/bin/sh' > /app/start.sh && \
