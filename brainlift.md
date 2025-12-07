@@ -1,0 +1,248 @@
+AI DJ for Navidrome
+
+- Context / Motivation
+  - Goal: Build a Spotify-like AI DJ feature on top of Navidrome for Gauntlet “Uncharted Territory” project
+  - Navidrome: self-hosted music server (Go backend, React/TypeScript frontend)
+  - You want:
+    - A non-trivial, cross-cutting feature (backend + frontend)
+    - New tech for you (Go, React/TS)
+    - Something clearly “AI-ish” and demo-friendly
+- Relationship to Smart Playlists
+  - Navidrome already has a Smart Playlist engine driven by `.nsp` JSON rules
+    - Smart Playlists are rule-based, dynamic playlists stored as .nsp files
+    - Evaluated by the backend and refreshed when accessed
+    - Currently only created/edited by hand-editing JSON or via 3rd-party apps (e.g., Feishin)
+  - Smart Playlist UI/API would be a big feature on its own
+  - For AI DJ:
+    - You do not plan to ship a full Smart Playlist editor
+    - Instead, reuse the same ideas (rules over metadata + history) inside the DJ engine
+    - Smart Playlist integration is more like internal infrastructure / inspiration
+- High-Level Product Concept
+  - “AI DJ” = endless, personalized radio mode for Navidrome
+  - User experience:
+    - Click “Start AI DJ” in the Navidrome UI
+    - Choose a mode (e.g., Default, Nostalgia, Discovery)
+    - AI DJ:
+      - Generates an initial queue of tracks
+      - Keeps filling the queue as tracks play
+      - Responds to skips and recent listening history
+      - Optionally provides short “DJ commentary” text (chapters)
+  - No voice/TTS in v1, text-only commentary is enough
+- Scope vs Non-Scope
+  - In-scope (v1)
+    - Backend DJ engine in Go
+    - Session-based model (per user, with modes and state)
+    - Simple rule + stats-based recommendation logic (no heavy ML)
+    - REST API for: start, state, next, skip, end
+    - Frontend integration into Navidrome’s React/TS app
+    - Optional LLM integration for commentary (if allowed by Gauntlet rules)
+  - Out of scope (v1)
+    - Full Smart Playlist CRUD UI
+    - Deep ML recommender / embeddings
+    - TTS / voice DJ
+    - Integrations with Google Assistant, Alexa, etc.
+    - Production-grade session persistence across restarts (nice-to-have)
+- Core Concepts
+  - DJ Session
+    - Represents one AI DJ run for a user
+    - Fields (conceptual):
+      - sessionId
+      - userId
+      - mode (default, nostalgia, discovery, etc.)
+      - createdAt, lastActive
+      - queue (list of upcoming track IDs)
+      - history (tracks played this session)
+      - Optional: seedTrackId, seedArtistId, seedPlaylistId
+  - Track Signals (from Navidrome DB)
+    - play_count (per user)
+    - last_played / play_date (per user)
+    - rating
+    - starred / loved flags
+    - Metadata: artist, album, year, genre, tags
+- Buckets & Modes
+  - Track Buckets (derived per user)
+    - `FAVORITES`
+      - Rating >= 4 OR starred = true OR top X% by play count
+    - `RECENT_FAVORITES`
+      - FAVORITES with last played within last ~30 days
+    - `NOSTALGIA`
+      - FAVORITES where year is old (e.g., <= currentYear - 7) OR last played > 180 days ago
+    - `DISCOVERY`
+      - Tracks with very low play count (0–1) OR not played in > 365 days
+    - `SIMILAR_TO_SEED` (if seeded)
+      - Same artist OR album OR genre as seed track/artist/playlist
+  - Modes (examples)
+    - `default`
+      - Mix: ~50% FAVORITES, 30% RECENT_FAVORITES, 20% DISCOVERY
+      - Constraints:
+        - No repeats within last N session tracks (e.g., 30)
+        - No more than ~3 tracks in a row from same artist
+    - `nostalgia`
+      - Mix: ~60% NOSTALGIA, 30% FAVORITES, 10% DISCOVERY
+    - `discovery`
+      - Mix: ~60% DISCOVERY, 30% SIMILAR_TO_SEED (or FAVORITES if no seed), 10% random
+  - Selection Algorithm
+    - For each new batch of tracks (e.g., 30):
+      - Sample a bucket using weights
+      - Pick a track from that bucket:
+        - Filter out tracks in recent session history
+        - Filter out tracks too recently played (global recency rule)
+      - If bucket yields no candidates, fall back to others
+    - Append chosen tracks to the session queue
+- DJ Session Lifecycle
+  - Start
+    - User clicks “Start AI DJ” and selects mode (and optionally a seed)
+    - Backend:
+      - Creates a DJSession
+      - Builds initial queue (e.g., 30 tracks)
+      - Generates initial chapterText (description)
+    - Frontend:
+      - Replaces or sets queue from upNext
+      - Starts playing the first track
+      - Shows AI DJ panel
+  - Playing / Next
+    - When a track finishes:
+      - Frontend calls /api/ai-dj/next with sessionId and playedTrackId
+      - Backend:
+        - Adds track to session history
+        - If queue is below threshold (e.g., 10 tracks), generates more
+        - Optionally updates chapterText every N tracks
+      - Frontend updates Up Next list
+  - Skip
+    - User hits skip:
+      - Player moves to next track
+      - Frontend calls /api/ai-dj/skip with sessionId, skippedTrackId
+      - Backend:
+        - Logs skip
+        - Temporarily downweights that track/artist/genre when picking new tracks
+        - Keeps queue size above threshold
+  - End
+    - User clicks “End DJ session”
+    - Frontend calls /api/ai-dj/end with sessionId
+    - Backend deletes/invalidates session
+    - Frontend hides DJ UI (queue behavior configurable: continue or clear)
+  - Expiration
+    - Sessions are auto-expired after inactivity (e.g., 60 minutes)
+    - Expired sessions return a specific error code; frontend treats that as “DJ stopped”
+- Backend API Design (REST)
+  - Base path: /api/ai-dj
+  - All endpoints require authentication; enforce session ownership
+  - `POST /api/ai-dj/start`
+    - Request:
+      - mode (optional, defaults to "default")
+      - seedTrackId / seedArtistId / seedPlaylistId (optional)
+    - Behavior:
+      - Create DJSession, generate initial queue, create initial chapter text
+    - Response:
+      - sessionId
+      - mode
+      - nowPlaying (null on start)
+      - upNext (list of track objects)
+      - chapterText (string)
+  - `GET /api/ai-dj/state`
+    - Query: sessionId
+    - Response:
+      - sessionId, mode
+      - nowPlaying
+      - upNext
+      - history (maybe truncated)
+      - chapterText
+  - `POST /api/ai-dj/next`
+    - Request:
+      - sessionId
+      - playedTrackId
+    - Behavior:
+      - Mark track as played (move from queue to history)
+      - Refill queue if below threshold
+      - Optionally refresh chapterText
+    - Response:
+      - Updated upNext
+      - Possibly updated chapterText
+  - `POST /api/ai-dj/skip`
+    - Request:
+      - sessionId
+      - skippedTrackId
+      - Optional reason
+    - Behavior:
+      - Log skip for this session
+      - Remove track from queue if still present
+      - Adjust weights to avoid similar tracks
+    - Response:
+      - Updated upNext
+      - Possibly updated chapterText
+  - `POST /api/ai-dj/end`
+    - Request:
+      - sessionId
+    - Behavior:
+      - End and remove session
+    - Response:
+      - 204 or { "status": "ended" }
+- Frontend / UI Requirements
+  - Entry Point
+    - Add “AI DJ” entry in Navidrome web app
+      - A button “Start AI DJ” in the player area or sidebar
+    - Start flow:
+      - Click button → modal opens
+      - Choose mode (Default / Nostalgia / Discovery)
+      - Optionally “Use current track as seed” if there is one playing
+      - Confirm → call /api/ai-dj/start and update queue
+  - DJ Panel
+    - Visible only when a DJ session is active
+    - Shows:
+      - Heading: “AI DJ – {mode}”
+      - chapterText (description of current chapter/stage)
+      - Now playing info with an “AI DJ” badge
+      - Up Next list (subset of upNext)
+    - Controls:
+      - Skip button (wired to player + /skip)
+      - End Session button (wired to /end)
+    - Error handling:
+      - If /state or other calls 404/410 (session expired), hide panel and show toast/message
+  - Player Integration
+    - When AI DJ is active:
+      - On track end: call /next
+      - On user skip: call /skip
+    - Keep a local representation of queue in sync with backend upNext
+- Optional AI Commentary (LLM)
+  - Purpose
+    - Add short, fun text blurbs that explain what the DJ is doing
+    - Example: “Diving into some of your older favorites from the early 2010s.”
+  - Inputs to LLM (server-side)
+    - Mode (default, nostalgia, discovery)
+    - A small window of recent tracks (artist, title, year, genre)
+    - Simple signals:
+      - “User skipped last 3 rock tracks”
+      - “Queue has a lot of 2010s indie tracks”
+  - When to call
+    - On session start (intro)
+    - Every N tracks (e.g., every 5)
+    - Possibly upon large mode/decade shifts in the queue
+  - Fallback when LLM disabled or fails
+    - Use static templates per mode, e.g.:
+      - Default: “Mixing your top tracks with songs you haven’t heard in a while.”
+      - Nostalgia: “Bringing back songs you haven’t played in a long time.”
+      - Discovery: “Exploring songs you rarely play, guided by your favorites.”
+- Edge Cases & Error Handling
+  - Very little or no play history
+    - Fallback to library-wide random with basic rules (no repeats, varied artists)
+    - Show a message like “You’re new here, so we’re exploring a bit of everything.”
+  - Small library
+    - If candidate buckets are tiny, relax constraints (shorter repeat window)
+  - Missing/deleted tracks
+    - If a queued track is missing when playback requests it, auto-skip and ask DJ for another track
+  - Session conflicts
+    - If requests refer to a non-existent / expired session, return specific error code
+    - Frontend should clear DJ UI and treat it as “session ended”
+  - Rapid skips
+    - Ensure skip calls are idempotent or safely handled even if user taps quickly
+- Why This Fits the Gauntlet Project
+  - New territory
+    - Go backend, React/TypeScript frontend, possibly LLM integration
+  - Complexity
+    - Session management, recommendation logic, and UI state all tied together
+  - Brownfield integration
+    - Uses existing Navidrome DB fields (play counts, ratings, favorites, metadata)
+    - Hooks into existing player/queue behavior
+  - Demo Story
+    - Before: only static playlists/manual listening
+    - After: one-click AI DJ that plays endless, personalized music with adaptive behavior and commentary
