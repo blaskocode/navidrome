@@ -80,6 +80,11 @@ ENV ND_CONFIGFILE=/data/navidrome.toml
 ENV ND_PORT=4533
 RUN mkdir -p /data/music && touch /.nddockerenv
 
+# Copy sample music files for demo (from test fixtures)
+COPY tests/fixtures/artist/an-album/test.mp3 /data/music/Sample\ Artist/Sample\ Album/01\ -\ Test\ Song.mp3
+COPY tests/fixtures/test.mp3 /data/music/Sample\ Artist/Sample\ Album/02\ -\ Another\ Song.mp3
+COPY tests/fixtures/no_replaygain.mp3 /data/music/Sample\ Artist/Sample\ Album/03\ -\ Third\ Track.mp3
+
 EXPOSE 4533
 WORKDIR /app
 
