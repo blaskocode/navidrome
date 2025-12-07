@@ -1,16 +1,17 @@
 # Railway-compatible Dockerfile for Navidrome
-# Uses pre-built static TagLib for proper linking
+# Uses Debian-based build for glibc compatibility with pre-built TagLib
 
 ########################################################################################################################
 ### Get pre-built static TagLib
-FROM alpine:3.19 AS taglib-build
+FROM debian:bookworm-slim AS taglib-build
 ARG CROSS_TAGLIB_VERSION=2.1.1-1
 ENV CROSS_TAGLIB_RELEASES_URL=https://github.com/navidrome/cross-taglib/releases/download/v${CROSS_TAGLIB_VERSION}/
 
-RUN apk add --no-cache wget && \
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates && \
     wget ${CROSS_TAGLIB_RELEASES_URL}taglib-linux-amd64.tar.gz && \
     mkdir /taglib && \
-    tar -xzf taglib-linux-amd64.tar.gz -C /taglib
+    tar -xzf taglib-linux-amd64.tar.gz -C /taglib && \
+    rm -rf /var/lib/apt/lists/*
 
 ########################################################################################################################
 ### Build Navidrome UI
@@ -27,11 +28,13 @@ COPY ui/ ./
 RUN npm run build -- --outDir=/build
 
 ########################################################################################################################
-### Build Navidrome binary
-FROM golang:1.25-alpine AS build
+### Build Navidrome binary (using Debian for glibc compatibility)
+FROM golang:1.25-bookworm AS build
 
 # Install build dependencies
-RUN apk add --no-cache git gcc g++ musl-dev pkgconfig zlib-dev zlib-static
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git gcc g++ pkg-config zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy pre-built static TagLib
 COPY --from=taglib-build /taglib /taglib
