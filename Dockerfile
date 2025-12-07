@@ -19,8 +19,8 @@ RUN npm run build -- --outDir=/build
 ### Build Navidrome binary
 FROM golang:1.25-alpine AS build
 
-# Install build dependencies
-RUN apk add --no-cache git gcc g++ musl-dev pkgconfig taglib-dev zlib-dev
+# Install build dependencies (including static libraries)
+RUN apk add --no-cache git gcc g++ musl-dev pkgconfig taglib-dev zlib-dev zlib-static
 
 WORKDIR /src
 
@@ -37,9 +37,9 @@ COPY --from=ui /build ./ui/build
 ARG GIT_SHA
 ARG GIT_TAG
 
-# Build the binary
+# Build the binary with static linking
 RUN CGO_ENABLED=1 go build -tags=netgo \
-    -ldflags="-w -s \
+    -ldflags="-w -s -extldflags '-static -latomic' \
         -X github.com/navidrome/navidrome/consts.gitSha=${GIT_SHA} \
         -X github.com/navidrome/navidrome/consts.gitTag=${GIT_TAG}" \
     -o /navidrome .
