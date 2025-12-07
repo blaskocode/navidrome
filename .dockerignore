@@ -1,18 +1,47 @@
+# OS files
 .DS_Store
-ui/node_modules
+.idea
+.vscode
+
+# Node.js - critical to exclude (770MB+)
+**/node_modules
+
+# Build artifacts
 ui/build
 !ui/build/.gitkeep
-Dockerfile
-docker-compose*.yml
-data
-*.db
-testDB
-navidrome
-navidrome.toml
-tmp
-!tmp/taglib
 dist
 binaries
+bin
+
+# Data and cache
+data
+*.db
+*.db-*
+testDB
 cache
+tmp
+!tmp/taglib
+
+# Local files
+navidrome
+navidrome.toml
 music
-!Dockerfile
+
+# Docker files (exclude standard, keep railway)
+docker-compose*.yml
+!Dockerfile.railway
+
+# Git
+.git
+.gitignore
+
+# Plugins
+plugins
+
+# Misc
+thoughts
+wiki
+*.exe
+*.test
+*.wasm
+*.swp
