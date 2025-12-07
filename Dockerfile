@@ -1,5 +1,6 @@
 # Railway-compatible Dockerfile for Navidrome
 # Uses Debian-based build for glibc compatibility with pre-built TagLib
+# Force rebuild: v2
 
 ########################################################################################################################
 ### Get pre-built static TagLib
