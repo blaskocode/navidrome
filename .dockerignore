@@ -35,8 +35,8 @@ docker-compose*.yml
 .git
 .gitignore
 
-# Plugins
-plugins
+# Plugins (keep - required for build)
+# plugins
 
 # Misc
 thoughts
